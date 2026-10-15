@@ -9,7 +9,8 @@
     "check": "tsc --noEmit",
     "test": "npm run build && node --experimental-transform-types --test tests/*.test.mjs",
     "build": "wrangler deploy --env=\"\" --dry-run --outdir dist",
-    "configure": "node --env-file-if-exists=.env.deploy.local scripts/configure.mjs"
+    "configure": "node --env-file-if-exists=.env.deploy.local scripts/configure.mjs",
+    "test:wrangler": "node --test tests/wrangler.integration.mjs"
   },
   "dependencies": {
     "@simplewebauthn/server": "^13.0.0"

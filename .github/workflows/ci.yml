@@ -7,6 +7,9 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      WRANGLER_SEND_METRICS: "false"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -15,4 +18,14 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
-      - run: npm test
+      - name: Build and run regression tests
+        run: npm test
+      - name: Validate generated deployment config with Wrangler
+        env:
+          PUBLIC_ORIGIN: https://vpn.example.com
+          SITE_NAME: CI Access
+        run: |
+          npm run configure
+          npx wrangler deploy --config wrangler.deploy.json --env="" --dry-run --outdir dist/deployment-check
+      - name: Test authentication over HTTP using wrangler dev
+        run: npm run test:wrangler

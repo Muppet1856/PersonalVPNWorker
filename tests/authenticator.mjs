@@ -1,7 +1,6 @@
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 const hash = x => createHash('sha256').update(x).digest();
 const b64 = x => Buffer.from(x).toString('base64url');
-const origin = 'http://localhost:8787';
 // Minimal CBOR encoder to construct an authenticator's standards-based none attestation.
 function cbor(value) {
   const head=(major,n)=>n<24?Buffer.from([(major<<5)|n]):n<256?Buffer.from([(major<<5)|24,n]):Buffer.from([(major<<5)|25,n>>8,n&255]);
@@ -11,7 +10,7 @@ function cbor(value) {
   if(value instanceof Map) return Buffer.concat([head(5,value.size),...[...value].flatMap(([k,v])=>[cbor(k),cbor(v)])]);
   throw Error('Unsupported CBOR fixture');
 }
-export function authenticator() {
+export function authenticator(origin = 'http://localhost:8787') {
   const {privateKey, publicKey}=generateKeyPairSync('ec',{namedCurve:'prime256v1'});
   const jwk=publicKey.export({format:'jwk'});const id=Buffer.from(crypto.randomUUID());
   const cose=cbor(new Map([[1,2],[3,-7],[-1,1],[-2,Buffer.from(jwk.x,'base64url')],[-3,Buffer.from(jwk.y,'base64url')]]));

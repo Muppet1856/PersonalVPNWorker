@@ -100,13 +100,14 @@ Connect your fork/repository and select its deployment branch. Set:
 - Build environment variables: `PUBLIC_ORIGIN` and any optional settings from the table. `WORKER_NAME` must match the Worker connected to the build.
 - Worker runtime secret: `ADMIN_SETUP_SECRET`, configured separately from build variables.
 
-The included GitHub Actions workflow checks TypeScript, builds the Worker and runs tests. It does not deploy or need Cloudflare credentials. A connected Cloudflare Workers Builds deployment is managed separately.
+The included GitHub Actions workflow checks TypeScript, builds the Worker and runs tests, then starts `wrangler dev` to test authentication over HTTP. It also validates a generated deployment config with a Wrangler dry run. It does not deploy or need Cloudflare credentials. A connected Cloudflare Workers Builds deployment is managed separately.
 
 ## Development and validation
 
 ```sh
 npm run check
 npm test
+npm run test:wrangler
 npm run build
 ```
 
