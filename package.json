@@ -1,14 +1,15 @@
 {
-  "name": "zellen-family-access",
+  "name": "personal-vpn-worker",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "wrangler dev --local --env local",
-    "deploy": "wrangler deploy --env=\"\"",
+    "deploy": "npm run configure && wrangler deploy --config wrangler.deploy.json --env=\"\"",
     "check": "tsc --noEmit",
     "test": "npm run build && node --experimental-transform-types --test tests/*.test.mjs",
-    "build": "wrangler deploy --env=\"\" --dry-run --outdir dist"
+    "build": "wrangler deploy --env=\"\" --dry-run --outdir dist",
+    "configure": "node --env-file-if-exists=.env.deploy.local scripts/configure.mjs"
   },
   "dependencies": {
     "@simplewebauthn/server": "^13.0.0"

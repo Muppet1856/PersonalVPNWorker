@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "zellen-family-access",
+  "name": "family-access",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
   "compatibility_flags": [
@@ -8,25 +8,22 @@
   ],
   "workers_dev": false,
   "vars": {
-    "PUBLIC_ORIGIN": "https://vpn.zellen.me",
-    "RP_ID": "vpn.zellen.me",
-    "SITE_NAME": "Zellen Family Access"
+    "PUBLIC_ORIGIN": "http://localhost:8787",
+    "RP_ID": "localhost",
+    "SITE_NAME": "Family Access",
+    "FAMILY_ID": "family-v1"
   },
-  "routes": [
-    {
-      "pattern": "vpn.zellen.me",
-      "custom_domain": true
-    }
-  ],
+  "routes": [],
   "env": {
     "local": {
-      "name": "zellen-family-access-local",
+      "name": "family-access-local",
       "workers_dev": false,
       "routes": [],
       "vars": {
         "PUBLIC_ORIGIN": "http://localhost:8787",
         "RP_ID": "localhost",
-        "SITE_NAME": "Zellen Family Access"
+        "SITE_NAME": "Family Access",
+        "FAMILY_ID": "family-v1"
       },
       "durable_objects": {
         "bindings": [
