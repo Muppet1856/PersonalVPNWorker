@@ -89,3 +89,20 @@ test('actual streamed request size is limited and invalid JSON is rejected',asyn
 });
 
 test('schema initialization preserves existing accounts on object restart',async()=>{const f=fixture();await enroll(f);new DB(f.env.DB.sql);assert.equal(f.env.DB.sql.prepare('SELECT count(*) AS n FROM users').get().n,1);});
+
+test('OIDC migration preserves the previous passkey schema and existing users',async()=>{
+ const {schemaV1}=await import('../src/schema.ts');const sql=new DatabaseSync(':memory:');
+ sql.exec(schemaV1);sql.exec("CREATE TABLE schema_version(version INTEGER PRIMARY KEY);INSERT INTO schema_version VALUES(1);INSERT INTO users(id,email,name,role,created_at) VALUES('existing','existing@example.com','Existing','admin',1)");
+ sql.prepare('INSERT INTO passkeys(id,user_id,public_key,counter,device_type,created_at) VALUES(?,?,?,?,?,?)').run('key','existing',Buffer.from([1,2,3]),4,'singleDevice',1);
+ new DB(sql);assert.equal(sql.prepare('SELECT counter FROM passkeys WHERE id=?').get('key').counter,4);assert.equal(sql.prepare('SELECT MAX(version) AS v FROM schema_version').get().v,2);
+ assert.ok(sql.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='oidc_keys'").get());
+});
+test('OIDC expired codes and disabled accounts cannot obtain identity tokens',async()=>{
+ const {createHash}=await import('node:crypto');const hash=x=>createHash('sha256').update(x).digest('base64url');
+ const f=fixture();await enroll(f);Object.assign(f.env,{ACCESS_TEAM_DOMAIN:'example.cloudflareaccess.com',OIDC_CLIENT_SECRET:'secret-at-least-32-characters-for-test'});
+ const user=f.env.DB.sql.prepare('SELECT id FROM users').get();const callback='https://example.cloudflareaccess.com/cdn-cgi/access/callback';const verifier='a'.repeat(43);
+ const insert=(token,expires)=>f.env.DB.sql.prepare('INSERT INTO oidc_codes(token_hash,user_id,client_id,redirect_uri,scope,challenge,auth_time,expires_at) VALUES(?,?,?,?,?,?,?,?)').run(hash(token),user.id,'family-access',callback,'openid',hash(verifier),1,expires);
+ const exchange=code=>worker.fetch(new Request(origin+'/oidc/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'authorization_code',client_id:'family-access',client_secret:f.env.OIDC_CLIENT_SECRET,redirect_uri:callback,code_verifier:verifier,code})}),f.env);
+ insert('expired',1);assert.equal((await exchange('expired')).status,400);
+ insert('disabled',Math.floor(Date.now()/1000)+100);f.env.DB.sql.exec('UPDATE users SET active=0');assert.equal((await exchange('disabled')).status,400);
+});

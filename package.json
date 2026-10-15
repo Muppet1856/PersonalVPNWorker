@@ -10,15 +10,17 @@
     "test": "npm run build && node --experimental-transform-types --test tests/*.test.mjs",
     "build": "wrangler deploy --env=\"\" --dry-run --outdir dist",
     "configure": "node --env-file-if-exists=.env.deploy.local scripts/configure.mjs",
-    "test:wrangler": "node --test tests/wrangler.integration.mjs"
+    "test:wrangler": "node --test tests/wrangler.integration.mjs",
+    "access:plan": "node --env-file-if-exists=.env.deploy.local scripts/configure-access.mjs"
   },
   "dependencies": {
-    "@simplewebauthn/server": "^13.0.0"
+    "@simplewebauthn/server": "^13.0.0",
+    "jose": "^6.2.12"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261015.1",
+    "miniflare": "5.20261012.0-beta",
     "typescript": "^5.9.0",
-    "wrangler": "4.151.0",
-    "miniflare": "5.20261012.0-beta"
+    "wrangler": "4.151.0"
   }
 }

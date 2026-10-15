@@ -10,6 +10,8 @@ WebAuthn verification awaits cryptographic operations, so requests can interleav
 
 The public repository contains generic defaults. `scripts/configure.mjs` combines a nonsecret deployment environment with the base Wrangler configuration, validates it and writes an ignored deployment config. Secrets are stored separately. `FAMILY_ID`, Worker identity and the Durable Object class/binding must remain stable to retain the same database.
 
-Future milestones retain invite-only membership: Sign in with Apple linking from authenticated sessions, Resend invitations/recovery with explicit recovery policy, then secure OIDC federation to Cloudflare Access. Apple email alone must never auto-authorize membership.
+The current OIDC milestone provides one confidential client with RS256 signing, mandatory S256 PKCE, exact callbacks, browser-bound login continuation, and automatic schema version 2. See [Access setup](access-setup.md) for API provisioning and its boundaries.
+
+Future milestones retain invite-only membership: Sign in with Apple linking from authenticated sessions, Resend invitations/recovery with explicit recovery policy, and further hardening/conformance review of the OIDC implementation. Apple email alone must never auto-authorize membership.
 
 Network access, local DNS, reverse proxies and existing tunnels stay outside this application's control. This is a private-group identity service, not a VPN tunnel server.

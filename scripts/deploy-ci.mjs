@@ -12,9 +12,11 @@ if(!dryRun) {
 const directory=mkdtempSync(join(tmpdir(),'worker-deploy-'));
 try {
   const args=['node_modules/wrangler/bin/wrangler.js','deploy','--config','wrangler.deploy.json','--env',''];
-  if(process.env.ADMIN_SETUP_SECRET) {
+  const secrets={};
+  for(const key of ['ADMIN_SETUP_SECRET','OIDC_CLIENT_SECRET'])if(process.env[key])secrets[key]=process.env[key];
+  if(Object.keys(secrets).length) {
     const secretFile=join(directory,'secrets.json');
-    writeFileSync(secretFile,JSON.stringify({ADMIN_SETUP_SECRET:process.env.ADMIN_SETUP_SECRET}),{mode:0o600});
+    writeFileSync(secretFile,JSON.stringify(secrets),{mode:0o600});
     args.push('--secrets-file',secretFile);
   }
   if(dryRun)args.push('--dry-run','--outdir','dist/deploy-ci-check');

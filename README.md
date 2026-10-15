@@ -6,9 +6,9 @@ Despite the repository name, this project currently provides **authentication**,
 
 ## Current milestone
 
-Implemented: first-administrator bootstrap, one-time invitations, WebAuthn passkey registration and login, server-side sessions, logout, administrator invitation creation, and a minimal portal. SQLite storage initializes automatically: no D1 database, database ID, or separate migration command is needed.
+Implemented: first-administrator bootstrap, one-time invitations, WebAuthn passkey registration and login, server-side sessions, logout, administrator invitation creation, a minimal portal/app launcher, OIDC Authorization Code + S256 PKCE federation, persistent RS256 signing keys, public discovery/JWKS, and optional Cloudflare Access API provisioning. SQLite storage initializes automatically: no D1 database, database ID, or separate migration command is needed.
 
-Not implemented yet: Sign in with Apple, Resend email delivery, OIDC federation to Cloudflare Access, account recovery, multiple-passkey administration, rate limiting, audit trails and production hardening. This milestone is for development and evaluation; finish those controls before using it as a production identity provider.
+Not implemented yet: Sign in with Apple, Resend email delivery, account recovery, multiple-passkey administration, audit trails and complete production hardening. The OIDC implementation supports one preconfigured confidential Cloudflare Access client; it is not a general-purpose, conformance-certified identity platform. This milestone is for development and evaluation; finish those controls before using it as a production identity provider.
 
 ## Quick start
 
@@ -34,6 +34,10 @@ curl http://localhost:8787/api/setup \
 
 Paste the returned token into **Accept family invitation**, enter your display name, and create a passkey. Sign out and test signing in with that email address. The signed-in administrator can generate invitations for others; deliver those tokens privately. Invitation email delivery is a later milestone.
 
+## Connect applications through Cloudflare Access
+
+After creating your administrator passkey, follow [Cloudflare Access setup](docs/access-setup.md). The optional GitHub deployment step can configure the identity provider, self-hosted applications and member allow policies using Cloudflare's API. It defaults to **off**. The Worker’s discovery and public-key endpoints are checked after each deployment, even before an Access client is configured.
+
 ## Configuration
 
 Copy the deployment template:
@@ -56,6 +60,10 @@ Edit `.env.deploy.local` for your installation. It is ignored by Git. Alternativ
 | `INVITE_TTL_SECONDS` | Regular invitation lifetime; maximum 7 days | `86400` (24 hours) |
 | `SETUP_INVITE_TTL_SECONDS` | First-admin invitation lifetime; maximum 24 hours | `3600` (1 hour) |
 | `CHALLENGE_TTL_SECONDS` | WebAuthn challenge lifetime; maximum 10 minutes | `300` (5 minutes) |
+| `ACCESS_TEAM_DOMAIN` | Existing Zero Trust team hostname, e.g. `example.cloudflareaccess.com` | Empty; federation disabled |
+| `OIDC_CLIENT_ID` | Identifier of the trusted Cloudflare Access client | `family-access` |
+| `ACCESS_APPS_JSON` | JSON array of `{ "name": "Chat", "domain": "chat.example.com" }` entries | `[]` |
+| `CONFIGURE_ACCESS` | GitHub-only opt-in to Access API provisioning | Off; set variable to `true` to enable |
 
 All lifetime values must be positive whole seconds. `PUBLIC_ORIGIN` must contain no credentials, port, path beyond `/`, query or fragment. `RP_ID` must match its hostname. The custom domain is generated from that same hostname.
 
@@ -122,7 +130,7 @@ Actions settings are scoped to repositories, organizations or deployment environ
 
 All other settings in the configuration table can also be supplied as repository variables. The deployment workflow also accepts these settings as repository secrets if preferred; a nonempty variable takes precedence over a secret of the same name. `CLOUDFLARE_ACCOUNT_ID` accepts either location too. Keep `CLOUDFLARE_API_TOKEN` and `ADMIN_SETUP_SECRET` as secrets. Empty optional variables use the documented defaults. Repository settings are private to your installation; generic examples remain in source.
 
-On deployment, Wrangler provisions/updates the Worker, custom domain and SQLite Durable Object binding. The optional bootstrap secret is sent using `--secrets-file` in the same deployment. It is written to a private temporary file, never printed, and removed when the deploy command finishes. Secrets absent from that file remain unchanged in Cloudflare.
+On deployment, Wrangler provisions/updates the Worker, custom domain and SQLite Durable Object binding. The optional bootstrap secret and configured `OIDC_CLIENT_SECRET` are sent using `--secrets-file` in the same deployment. It is written to a private temporary file, never printed, and removed when the deploy command finishes. Secrets absent from that file remain unchanged in Cloudflare. OIDC client setup also requires `ACCESS_TEAM_DOMAIN` and an `OIDC_CLIENT_SECRET` of at least 32 random characters; see the Access guide.
 
 After enrollment, delete `ADMIN_SETUP_SECRET` from **both GitHub Actions secrets and the deployed Worker**. Removing it from GitHub alone does not delete the existing Cloudflare secret; leaving it in GitHub would upload it again on the next deployment.
 
@@ -152,6 +160,8 @@ The source is organized as follows:
 | `src/config.ts` | Runtime setting defaults and lifetime bounds |
 | `src/store.ts`, `src/schema.ts` | Transactional SQLite access and schema initialization |
 | `scripts/configure.mjs` | Validated deployment config generation |
+| `src/oidc.ts` | OIDC flow, signing keys, throttling and expired-record cleanup |
+| `scripts/configure-access.mjs` | Optional, scoped Access API provisioning |
 | `.env.deploy.example` | Portable nonsecret deployment template |
 | `tests/` | Authentication, configuration and local-runtime tests |
 
@@ -159,7 +169,7 @@ The source is organized as follows:
 
 Passkey private keys remain with authenticators. The server stores public credentials and hashes of invitation/session tokens. Registration identity and display name are bound to server-issued challenges. Challenges are consumed atomically; enrollment writes execute inside synchronous SQLite transactions. HTML branding is escaped before rendering.
 
-The current UI uses inline scripts. Remaining hardening includes strict CSP/client bundling, throttling, enumeration resistance, expired-record cleanup, audit events, passkey/session management and a tested recovery policy.
+The current UI uses inline scripts. Basic per-IP/path request throttling and expired-record cleanup are included. Remaining hardening includes strict CSP/client bundling, stronger anti-abuse and enumeration resistance, audit events, passkey/session management, a tested recovery policy, and independent OIDC conformance/security review.
 
 Keep local DNS, reverse proxies, existing tunnels, VPNs and port forwarding under your own deployment's control. This application does not configure or change them. Do not place the future OIDC provider behind its own Cloudflare Access login, which would create an authentication loop.
 
@@ -169,7 +179,7 @@ Never commit `.env.deploy.local`, `.dev.vars.local`, invitation tokens, signing 
 
 ## Roadmap
 
-1. Authentication hardening, credential/session administration and recovery policy.
-2. Invite-only Sign in with Apple linking and Resend delivery.
-3. Reviewed OIDC Authorization Code + PKCE federation, discovery, JWKS, key rotation and Cloudflare Access integration.
-4. External rollout tests and deployment-specific network changes, if desired.
+1. Independent OIDC conformance/security review and real Cloudflare Access interoperability validation.
+2. Credential/session administration, audit events and recovery policy.
+3. Invite-only Sign in with Apple linking and Resend delivery.
+4. Deployment-specific external rollout tests and network changes, if desired.

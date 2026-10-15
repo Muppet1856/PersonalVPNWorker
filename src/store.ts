@@ -1,4 +1,4 @@
-import { schemaV1 } from './schema.ts';
+import { schemaV1, schemaV2 } from './schema.ts';
 
 type Value = string | number | null | ArrayBuffer | ArrayBufferView;
 
@@ -29,6 +29,10 @@ export class SqlStore {
       if (version < 1) {
         storage.sql.exec(schemaV1);
         storage.sql.exec('INSERT INTO schema_version(version) VALUES(1)');
+      }
+      if(version < 2) {
+        storage.sql.exec(schemaV2);
+        storage.sql.exec('INSERT INTO schema_version(version) VALUES(2)');
       }
     });
   }

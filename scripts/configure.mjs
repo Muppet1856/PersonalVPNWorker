@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { accessSettings } from './access-config.mjs';
 
 export function deploymentConfig(env, base) {
   if(!env.PUBLIC_ORIGIN)throw Error('Set PUBLIC_ORIGIN in .env.deploy.local, the build environment, or GitHub repository Actions Variables/Secrets');
@@ -21,6 +22,10 @@ export function deploymentConfig(env, base) {
     if(!Number.isSafeInteger(value)||value<1||value>max)throw Error(`${name} must be an integer from 1 to ${max}`);
     config.vars[name]=String(value);
   }
+  const access=accessSettings({...env,PUBLIC_ORIGIN:origin.origin});
+  config.vars.ACCESS_TEAM_DOMAIN=access.team;
+  config.vars.OIDC_CLIENT_ID=access.clientID;
+  config.vars.APP_LINKS_JSON=JSON.stringify(access.apps.map(app=>({name:app.name,url:'https://'+app.domain})));
   // Only explicitly listed nonsecret settings are copied, never process.env wholesale.
   return config;
 }
