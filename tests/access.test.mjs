@@ -40,3 +40,8 @@ test('Access refuses to overwrite unrelated applications before making writes',a
  const m=mock(true);await assert.rejects(configureAccess(env,{apply:true,fetcher:m.fetcher,log:()=>{}}),/not managed/);
  assert.ok(m.state.calls.every(x=>x.method==='GET'));
 });
+
+test('Access refuses to take over a same-named provider for another issuer',async()=>{
+ const m=mock();m.state.idps=[{id:'other',name:'family-access (PersonalVPNWorker)',type:'oidc',config:{client_id:'family-access',auth_url:'https://other.example/oidc/authorize'}}];
+ await assert.rejects(configureAccess(env,{apply:true,fetcher:m.fetcher,log:()=>{}}),/conflicts/);assert.ok(m.state.calls.every(x=>x.method==='GET'));
+});

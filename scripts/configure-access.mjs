@@ -27,7 +27,7 @@ export async function configureAccess(env,{apply=false,fetcher=fetch,log=console
  const org=(await api('/organizations')).result;if(org.auth_domain!==team)throw Error('ACCESS_TEAM_DOMAIN does not match this account’s existing Zero Trust organization');
  const idps=await list('/identity_providers'),existingApps=await list('/apps');
  const matches=idps.filter(x=>x.name===managedName);if(matches.length>1)throw Error('Multiple managed identity providers found');
- const existingIDP=matches[0];if(existingIDP&&(existingIDP.type!=='oidc'||existingIDP.config?.client_id!==clientID))throw Error('Existing identity provider conflicts with managed configuration');
+ const existingIDP=matches[0];if(existingIDP&&(existingIDP.type!=='oidc'||existingIDP.config?.client_id!==clientID||existingIDP.config?.auth_url!==plan.identity_provider.auth_url||existingIDP.config?.token_url!==plan.identity_provider.token_url||existingIDP.config?.certs_url!==plan.identity_provider.certs_url))throw Error('Existing identity provider conflicts with managed configuration');
  const targets=[];
  for(const app of apps) {
   const name=`${clientID}: ${app.name}`;
