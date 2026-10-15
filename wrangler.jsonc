@@ -1,0 +1,55 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "zellen-family-access",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "workers_dev": false,
+  "vars": {
+    "PUBLIC_ORIGIN": "https://vpn.zellen.me",
+    "RP_ID": "vpn.zellen.me"
+  },
+  "routes": [
+    {
+      "pattern": "vpn.zellen.me",
+      "custom_domain": true
+    }
+  ],
+  "env": {
+    "local": {
+      "name": "zellen-family-access-local",
+      "workers_dev": false,
+      "routes": [],
+      "vars": {
+        "PUBLIC_ORIGIN": "http://localhost:8787",
+        "RP_ID": "localhost"
+      },
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "FAMILY_AUTH",
+            "class_name": "FamilyAuth"
+          }
+        ]
+      }
+    }
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "FAMILY_AUTH",
+        "class_name": "FamilyAuth"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "FamilyAuth"
+      ]
+    }
+  ]
+}

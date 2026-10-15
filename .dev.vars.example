@@ -1,0 +1,2 @@
+# Copy to .dev.vars for local development. Never commit secrets.
+ADMIN_SETUP_SECRET=generate-a-long-random-secret-before-first-use

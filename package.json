@@ -1,0 +1,22 @@
+{
+  "name": "zellen-family-access",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local --env local",
+    "deploy": "wrangler deploy --env=\"\"",
+    "check": "tsc --noEmit",
+    "test": "npm run build && node --experimental-transform-types --test tests/*.test.mjs",
+    "build": "wrangler deploy --env=\"\" --dry-run --outdir dist"
+  },
+  "dependencies": {
+    "@simplewebauthn/server": "^13.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261015.1",
+    "typescript": "^5.9.0",
+    "wrangler": "4.151.0",
+    "miniflare": "5.20261012.0-beta"
+  }
+}
