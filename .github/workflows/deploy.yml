@@ -1,0 +1,45 @@
+name: Deploy Worker
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+jobs:
+  validate:
+    uses: ./.github/workflows/ci.yml
+  deploy:
+    needs: validate
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      WRANGLER_SEND_METRICS: "false"
+      PUBLIC_ORIGIN: ${{ vars.PUBLIC_ORIGIN }}
+      WORKER_NAME: ${{ vars.WORKER_NAME }}
+      SITE_NAME: ${{ vars.SITE_NAME }}
+      RP_ID: ${{ vars.RP_ID }}
+      FAMILY_ID: ${{ vars.FAMILY_ID }}
+      SESSION_COOKIE_NAME: ${{ vars.SESSION_COOKIE_NAME }}
+      SESSION_TTL_SECONDS: ${{ vars.SESSION_TTL_SECONDS }}
+      INVITE_TTL_SECONDS: ${{ vars.INVITE_TTL_SECONDS }}
+      SETUP_INVITE_TTL_SECONDS: ${{ vars.SETUP_INVITE_TTL_SECONDS }}
+      CHALLENGE_TTL_SECONDS: ${{ vars.CHALLENGE_TTL_SECONDS }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Generate deployment configuration
+        run: npm run configure
+      - name: Deploy Worker and optional bootstrap secret with Wrangler
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ADMIN_SETUP_SECRET: ${{ secrets.ADMIN_SETUP_SECRET }}
+        run: node scripts/deploy-ci.mjs

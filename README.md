@@ -90,17 +90,47 @@ npx wrangler secret delete ADMIN_SETUP_SECRET --config wrangler.deploy.json
 
 Only one bootstrap invitation can be issued. If it expires before enrollment, the account owner can delete that **unused** administrator invitation through the Durable Object SQL console after confirming the `users` table is empty, then repeat bootstrap. Do not delete registered users or change `FAMILY_ID` to recover a token.
 
-### Cloudflare Workers Builds
+### GitHub Actions deployment (recommended)
 
-Connect your fork/repository and select its deployment branch. Set:
+`.github/workflows/deploy.yml` deploys on pushes to `main`, or manually through **Actions → Deploy Worker → Run workflow** on `main`. It first calls the reusable validation workflow: TypeScript checks, regression tests, generated-config dry run and HTTP authentication tests using `wrangler dev`. Deployment runs only after all checks pass, using the repository-pinned Wrangler CLI.
 
-- Root directory: repository root (`/`).
-- Build command: `npm ci && npm run build`.
-- Deploy command: `npm run deploy`.
-- Build environment variables: `PUBLIC_ORIGIN` and any optional settings from the table. `WORKER_NAME` must match the Worker connected to the build.
-- Worker runtime secret: `ADMIN_SETUP_SECRET`, configured separately from build variables.
+In your GitHub repository, open **Settings → Secrets and variables → Actions**.
 
-The included GitHub Actions workflow checks TypeScript, builds the Worker and runs tests, then starts `wrangler dev` to test authentication over HTTP. It also validates a generated deployment config with a Wrangler dry run. It does not deploy or need Cloudflare credentials. A connected Cloudflare Workers Builds deployment is managed separately.
+Add these **repository secrets** on the **Secrets** tab:
+
+| Secret | Value |
+| --- | --- |
+| `CLOUDFLARE_API_TOKEN` | API token allowed to deploy Workers in your Cloudflare account and manage the selected custom-domain zone |
+| `CLOUDFLARE_ACCOUNT_ID` | The Cloudflare account ID containing the Worker and domain |
+| `ADMIN_SETUP_SECRET` | A long random bootstrap secret for first-admin enrollment; optional after setup |
+
+Create the API token using Cloudflare's **Edit Cloudflare Workers** template, scoped to your account and target zone. Ensure its permissions cover Worker deployment, Durable Object namespace/migration creation and custom-domain/route management. See [Cloudflare's GitHub Actions setup](https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/) and [Workers permissions](https://developers.cloudflare.com/workers/authorization/workers/). Use an API token, not your Global API key.
+
+Add these **repository variables** on the **Variables** tab:
+
+| Variable | Example |
+| --- | --- |
+| `PUBLIC_ORIGIN` | `https://vpn.example.com` (required) |
+| `WORKER_NAME` | `family-access`, or your existing Worker's name |
+| `SITE_NAME` | `Family Access` |
+
+### Deploying your own fork
+
+Fork this repository into your own GitHub account, enable Actions if GitHub prompts, then create the variables and secrets in **your fork's** settings. Forks do not inherit the original repository's Actions variables or secrets. Each owner supplies their own hostname, Cloudflare credentials and bootstrap secret, so each fork deploys independently to its owner's account.
+
+Actions settings are scoped to repositories, organizations or deployment environments, not automatically to whichever GitHub user clicks Run workflow. If several people share one repository and need separate deployments, use separate GitHub environments with their own settings and a workflow that explicitly selects the target environment; the included workflow deploys one installation per repository.
+
+All other settings in the configuration table can also be supplied as repository variables. Empty optional variables use the documented defaults. Repository settings are private to your installation; generic examples remain in source.
+
+On deployment, Wrangler provisions/updates the Worker, custom domain and SQLite Durable Object binding. The optional bootstrap secret is sent using `--secrets-file` in the same deployment. It is written to a private temporary file, never printed, and removed when the deploy command finishes. Secrets absent from that file remain unchanged in Cloudflare.
+
+After enrollment, delete `ADMIN_SETUP_SECRET` from **both GitHub Actions secrets and the deployed Worker**. Removing it from GitHub alone does not delete the existing Cloudflare secret; leaving it in GitHub would upload it again on the next deployment.
+
+Disable an existing Cloudflare Workers Builds integration for the same branch/Worker when switching to GitHub Actions, so only one pipeline controls deployments. Cloudflare credentials are passed only to the deployment step; pull-request and branch validation does not receive them.
+
+### Optional: Cloudflare Workers Builds
+
+If you prefer Cloudflare-managed builds instead of GitHub deployment, disable `deploy.yml` in GitHub Actions. Connect the repository in Cloudflare, use `npm ci && npm run build` as the build command and `npm run deploy` as the deploy command, supply the configuration values as build variables, and set `ADMIN_SETUP_SECRET` separately as a Worker runtime secret. `WORKER_NAME` must match the connected Worker.
 
 ## Development and validation
 
