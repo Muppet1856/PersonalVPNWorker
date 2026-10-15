@@ -137,3 +137,49 @@ test('email schema migration preserves existing v2 invitations and passkey accou
  sql.prepare('INSERT INTO invites(token_hash,email,role,expires_at,created_by) VALUES(?,?,?,?,?)').run('existing-hash','family@example.com','family',2000000000,'existing-admin');
  new DB(sql);const invite=sql.prepare('SELECT * FROM invites').get();assert.equal(invite.token_hash,'existing-hash');assert.equal(invite.expires_at,2000000000);assert.equal(invite.created_at,0);assert.equal(sql.prepare('SELECT MAX(version) AS v FROM schema_version').get().v,3);
 });
+
+test('user management is administrator-only and rejects cross-origin mutations',async()=>{
+ const f=fixture();const {cookie}=await enroll(f);
+ for(const path of ['/api/admin/users','/api/admin/invites'])assert.equal((await f.call(path)).status,403);
+ assert.equal((await f.call('/api/admin/users',{user_id:'missing',action:'disable'},cookie,'https://evil.example')).status,403);
+ const users=await (await f.call('/api/admin/users',undefined,cookie)).json();assert.equal(users.users.length,1);assert.equal(users.users[0].passkey_count,1);assert.equal(users.users[0].session_count,1);assert.equal(users.users[0].role,'admin');
+ assert.equal(JSON.stringify(users).includes('public_key'),false);assert.equal(JSON.stringify(users).includes('token_hash'),false);
+ assert.equal((await f.call('/api/admin/users',{user_id:users.users[0].id,action:'disable'},cookie)).status,409);
+ assert.equal((await f.call('/api/me',undefined,cookie)).status,200);
+});
+async function enrollFamily(f,adminCookie){
+ const invite=await (await f.call('/api/admin/invite',{email:'family@example.com'},adminCookie)).json();const o=await (await f.call('/api/register/options',{token:invite.token,name:'Family <member>'})).json();const auth=authenticator();const registered=await f.call('/api/register/verify',{token:invite.token,flow:o.flow,credential:auth.register(o.options.challenge)});assert.equal(registered.status,200);const cookie=registered.headers.get('set-cookie').split(';')[0];
+ return {auth,cookie,user:(await (await f.call('/api/me',undefined,cookie)).json()).user};
+}
+test('disable clears family sessions and OIDC credentials; enabling preserves passkeys and requires fresh login',async()=>{
+ const f=fixture();const admin=await enroll(f);const family=await enrollFamily(f,admin.cookie);
+ assert.equal((await f.call('/api/admin/users',undefined,family.cookie)).status,403);
+ assert.equal((await f.call('/api/admin/users',{user_id:admin.data.credential.id,action:'disable'},family.cookie)).status,403);
+ f.env.DB.sql.prepare('INSERT INTO oidc_tokens(token_hash,user_id,scope,expires_at) VALUES(?,?,?,?)').run('test-access-token',family.user.id,'openid',2000000000);
+ const disable=await f.call('/api/admin/users',{user_id:family.user.id,action:'disable'},admin.cookie);assert.equal(disable.status,200);
+ assert.equal((await (await f.call('/api/me',undefined,family.cookie)).json()).user,null);assert.equal((await f.call('/api/login/options',{email:family.user.email})).status,403);
+ assert.equal(f.env.DB.sql.prepare('SELECT count(*) AS n FROM oidc_tokens WHERE user_id=?').get(family.user.id).n,0);
+ assert.equal((await f.call('/api/admin/users',{user_id:family.user.id,action:'enable'},admin.cookie)).status,200);
+ assert.equal((await (await f.call('/api/me',undefined,family.cookie)).json()).user,null);
+ const options=await (await f.call('/api/login/options',{email:family.user.email})).json();assert.equal((await f.call('/api/login/verify',{flow:options.flow,credential:family.auth.login(options.options.challenge)})).status,200);
+ const list=await (await f.call('/api/admin/users',undefined,admin.cookie)).json();assert.equal(list.users.find(u=>u.id===family.user.id).passkey_count,1);
+});
+test('sign out everywhere invalidates sessions without removing the account or its passkey',async()=>{
+ const f=fixture();const admin=await enroll(f);const family=await enrollFamily(f,admin.cookie);
+ assert.equal((await f.call('/api/admin/users',{user_id:family.user.id,action:'revoke_sessions'},admin.cookie)).status,200);
+ assert.equal((await (await f.call('/api/me',undefined,family.cookie)).json()).user,null);
+ assert.equal((await f.call('/api/login/options',{email:family.user.email})).status,200);
+ assert.equal((await f.call('/api/admin/users',{user_id:'missing',action:'revoke_sessions'},admin.cookie)).status,404);
+ assert.equal((await f.call('/api/admin/users',{user_id:family.user.id,action:'promote'},admin.cookie)).status,400);
+});
+test('revoking a pending invitation blocks in-flight enrollment and does not touch enrolled users',async()=>{
+ const f=fixture();const admin=await enroll(f);const invitation=await (await f.call('/api/admin/invite',{email:'pending@example.com'},admin.cookie)).json();
+ const pending=await (await f.call('/api/admin/invites',undefined,admin.cookie)).json();assert.equal(pending.invitations.length,1);assert.equal(JSON.stringify(pending).includes(invitation.token),false);const id=pending.invitations[0].id;
+ const options=await (await f.call('/api/register/options',{token:invitation.token,name:'Pending'})).json();
+ assert.equal((await f.call('/api/admin/invites/revoke',{invitation_id:id})).status,403);
+ assert.equal((await f.call('/api/admin/invites/revoke',{invitation_id:id},admin.cookie)).status,200);
+ assert.equal((await f.call('/api/register/verify',{token:invitation.token,flow:options.flow,credential:authenticator().register(options.options.challenge)})).status,403);
+ assert.equal((await (await f.call('/api/admin/invites',undefined,admin.cookie)).json()).invitations.length,0);
+ assert.equal((await f.call('/api/admin/invites/revoke',{invitation_id:id},admin.cookie)).status,409);
+ assert.equal(f.env.DB.sql.prepare('SELECT count(*) AS n FROM users').get().n,1);
+});

@@ -46,6 +46,12 @@ test('wrangler dev: portal, passkeys, sessions, invitations and replay rejection
     const cookie=registered.headers.get('set-cookie').split(';')[0];
     assert.equal((await (await call('/api/me',undefined,cookie)).json()).user.role,'admin');
     assert.equal((await call('/api/admin/invite',{email:'member@example.com'},cookie)).status,200);
+    assert.equal((await call('/api/admin/users')).status,403);
+    const members=await (await call('/api/admin/users',undefined,cookie)).json();assert.equal(members.users[0].passkey_count,1);assert.equal(members.users[0].session_count,1);
+    assert.equal((await call('/api/admin/users',{user_id:members.users[0].id,action:'disable'},cookie)).status,409);
+    const pending=await (await call('/api/admin/invites',undefined,cookie)).json();assert.equal(pending.invitations.length,1);
+    assert.equal((await call('/api/admin/invites/revoke',{invitation_id:pending.invitations[0].id},cookie)).status,200);
+    assert.equal((await (await call('/api/admin/invites',undefined,cookie)).json()).invitations.length,0);
     const options2=await (await call('/api/login/options',{email:'ci@example.com'})).json();
     const assertion={flow:options2.flow,credential:auth.login(options2.options.challenge)};
     const login=await call('/api/login/verify',assertion);assert.equal(login.status,200);

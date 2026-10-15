@@ -6,7 +6,7 @@ Despite the repository name, this project currently provides **authentication**,
 
 ## Current milestone
 
-Implemented: first-administrator bootstrap, one-time invitations, WebAuthn passkey registration and login, server-side sessions, logout, administrator invitation creation and optional Resend invitation emails, a minimal portal/app launcher, OIDC Authorization Code + S256 PKCE federation, persistent RS256 signing keys, public discovery/JWKS, and optional Cloudflare Access API provisioning. SQLite storage initializes automatically: no D1 database, database ID, or separate migration command is needed.
+Implemented: first-administrator bootstrap, one-time invitations, WebAuthn passkey registration and login, server-side sessions, logout, administrator invitation creation, a user management console and optional Resend invitation emails, a minimal portal/app launcher, OIDC Authorization Code + S256 PKCE federation, persistent RS256 signing keys, public discovery/JWKS, and optional Cloudflare Access API provisioning. SQLite storage initializes automatically: no D1 database, database ID, or separate migration command is needed.
 
 Not implemented yet: Sign in with Apple, account recovery, multiple-passkey administration, audit trails and complete production hardening. The OIDC implementation supports one preconfigured confidential Cloudflare Access client; it is not a general-purpose, conformance-certified identity platform. This milestone is for development and evaluation; finish those controls before using it as a production identity provider.
 
@@ -37,6 +37,19 @@ Paste the returned token into **Accept family invitation**, enter your display n
 ## Connect applications through Cloudflare Access
 
 After creating your administrator passkey, follow [Cloudflare Access setup](docs/access-setup.md). The optional GitHub deployment step can configure the identity provider, self-hosted applications and member allow policies using Cloudflare's API. It defaults to **off**. The Worker’s discovery and public-key endpoints are checked after each deployment, even before an Access client is configured.
+
+## User management console
+
+Open your configured `PUBLIC_ORIGIN` and sign in with the administrator passkey. The **User management** section shows user names, email addresses, roles, account status, passkey counts, active portal-session counts and the last passkey sign-in. Sign-in and enrollment forms are hidden while signed in.
+
+- **Disable account** blocks a family member from signing in, removes their portal sessions, and clears pending login challenges and Worker-issued OIDC codes/access tokens. It retains their account and passkey.
+- **Enable account** restores sign-in using the existing passkey. Old portal sessions remain invalid.
+- **Sign out everywhere** clears a user's portal sessions and pending authentication state. The account can sign in again; choosing your own administrator account signs you out too.
+- **Pending invitations** lists unexpired, unused invitations. **Revoke invitation** invalidates that enrollment link, including an enrollment already in progress. Enrolled accounts are retained.
+
+Only active administrators can use the management endpoints. Mutation requests require the configured same-site Origin. Administrator accounts and bootstrap invitations are protected from disabling/revocation in this console. Accounts are not deleted, roles cannot be changed, and existing passkeys are not removed. Lists show up to 200 records and indicate when that limit is reached.
+
+Cloudflare Access has its own sessions. Disabling a user or signing them out here does not immediately revoke a previously established Cloudflare Access session or a signed ID token; revoke those sessions in Cloudflare when immediate application access removal is needed. The portal displays this distinction beside the controls.
 
 ## Invitation emails with Resend
 
@@ -189,6 +202,7 @@ The source is organized as follows:
 | `src/config.ts` | Runtime setting defaults and lifetime bounds |
 | `src/store.ts`, `src/schema.ts` | Transactional SQLite access and schema initialization |
 | `scripts/configure.mjs` | Validated deployment config generation |
+| `src/admin.ts` | Administrator-only user status, session revocation and pending invitation controls |
 | `src/email.ts` | Resend invitation templates, validation and bounded idempotent delivery |
 | `src/launcher.ts` | Custom launcher rendering and Access JWT verification |
 | `src/oidc.ts` | OIDC flow, signing keys, throttling and expired-record cleanup |
@@ -200,7 +214,7 @@ The source is organized as follows:
 
 Passkey private keys remain with authenticators. The server stores public credentials and hashes of invitation/session tokens. Registration identity and display name are bound to server-issued challenges. Challenges are consumed atomically; enrollment writes execute inside synchronous SQLite transactions. HTML branding is escaped before rendering.
 
-The current UI uses inline scripts. Basic per-IP/path request throttling and expired-record cleanup are included. Remaining hardening includes strict CSP/client bundling, stronger anti-abuse and enumeration resistance, audit events, passkey/session management, a tested recovery policy, and independent OIDC conformance/security review.
+The current UI uses inline scripts. Basic per-IP/path request throttling and expired-record cleanup are included. Remaining hardening includes strict CSP/client bundling, stronger anti-abuse and enumeration resistance, audit events, individual passkey/session management, a tested recovery policy, and independent OIDC conformance/security review.
 
 Keep local DNS, reverse proxies, existing tunnels, VPNs and port forwarding under your own deployment's control. This application does not configure or change them. Do not place the future OIDC provider behind its own Cloudflare Access login, which would create an authentication loop.
 
@@ -211,6 +225,6 @@ Never commit `.env.deploy.local`, `.dev.vars.local`, invitation tokens, signing 
 ## Roadmap
 
 1. Independent OIDC conformance/security review and real Cloudflare Access interoperability validation.
-2. Credential/session administration, audit events and recovery policy.
+2. Individual credential/session administration, audit events and recovery policy.
 3. Invite-only Sign in with Apple linking and delivery webhooks/queueing.
 4. Deployment-specific external rollout tests and network changes, if desired.
