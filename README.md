@@ -6,9 +6,9 @@ Despite the repository name, this project currently provides **authentication**,
 
 ## Current milestone
 
-Implemented: first-administrator bootstrap, one-time invitations, WebAuthn passkey registration and login, server-side sessions, logout, administrator invitation creation, a minimal portal/app launcher, OIDC Authorization Code + S256 PKCE federation, persistent RS256 signing keys, public discovery/JWKS, and optional Cloudflare Access API provisioning. SQLite storage initializes automatically: no D1 database, database ID, or separate migration command is needed.
+Implemented: first-administrator bootstrap, one-time invitations, WebAuthn passkey registration and login, server-side sessions, logout, administrator invitation creation and optional Resend invitation emails, a minimal portal/app launcher, OIDC Authorization Code + S256 PKCE federation, persistent RS256 signing keys, public discovery/JWKS, and optional Cloudflare Access API provisioning. SQLite storage initializes automatically: no D1 database, database ID, or separate migration command is needed.
 
-Not implemented yet: Sign in with Apple, Resend email delivery, account recovery, multiple-passkey administration, audit trails and complete production hardening. The OIDC implementation supports one preconfigured confidential Cloudflare Access client; it is not a general-purpose, conformance-certified identity platform. This milestone is for development and evaluation; finish those controls before using it as a production identity provider.
+Not implemented yet: Sign in with Apple, account recovery, multiple-passkey administration, audit trails and complete production hardening. The OIDC implementation supports one preconfigured confidential Cloudflare Access client; it is not a general-purpose, conformance-certified identity platform. This milestone is for development and evaluation; finish those controls before using it as a production identity provider.
 
 ## Quick start
 
@@ -32,11 +32,29 @@ curl http://localhost:8787/api/setup \
   --data '{"email":"admin@example.com","secret":"YOUR_LOCAL_SETUP_SECRET"}'
 ```
 
-Paste the returned token into **Accept family invitation**, enter your display name, and create a passkey. Sign out and test signing in with that email address. The signed-in administrator can generate invitations for others; deliver those tokens privately. Invitation email delivery is a later milestone.
+Paste the returned token into **Accept family invitation**, enter your display name, and create a passkey. Sign out and test signing in with that email address. The signed-in administrator can generate invitations for others; deliver those tokens privately. When Resend is configured, the administrator can email invitation links directly.
 
 ## Connect applications through Cloudflare Access
 
 After creating your administrator passkey, follow [Cloudflare Access setup](docs/access-setup.md). The optional GitHub deployment step can configure the identity provider, self-hosted applications and member allow policies using Cloudflare's API. It defaults to **off**. The Worker’s discovery and public-key endpoints are checked after each deployment, even before an Access client is configured.
+
+## Invitation emails with Resend
+
+Verify a sending domain in Resend, create a **sending-only API key restricted to that domain**, then configure:
+
+| Setting | Location | Example |
+| --- | --- | --- |
+| `RESEND_API_KEY` | GitHub Actions secret or Worker secret | Your restricted API key |
+| `RESEND_FROM` | GitHub Actions variable | `invites@mail.example.com` |
+| `RESEND_REPLY_TO` | Optional GitHub Actions variable | A monitored reply address |
+
+The workflow uploads a supplied API key using Wrangler's private secrets file. Existing Worker secrets are preserved when omitted from GitHub. Sender/reply-to settings can also be stored as Worker secrets when configuring directly through Cloudflare; deployment omits unspecified sender settings. Keep the sender and domain private to your installation, not in source. The domain's Resend open/click tracking should be disabled so private enrollment links are not rewritten or tracked.
+
+Sign in as administrator and use **Create and email invitation**. The recipient opens the link, enters a display name, and creates a passkey. The token is in the URL fragment, is removed from browser history after loading, and is not consumed by opening the email or link. Enrollment still requires explicit WebAuthn registration. Links expire according to `INVITE_TTL_SECONDS` and can be redeemed once.
+
+Sending uses one bounded retry for network errors, HTTP 429 or 5xx, with the same idempotency key and payload. Provider acceptance is not proof of inbox delivery. If delivery cannot be confirmed, the administrator gets the private link to share manually; the email may still arrive. There is no durable delivery queue or bounce webhook yet. The API requires `send_email: true` to send; without it, invitations remain manual. Sending is available only with HTTPS and valid sender/key settings.
+
+Invitations are limited to one per address per minute and three per address per administrator per hour, including manual and failed email attempts. The SQLite schema upgrades automatically and preserves existing users, passkeys and invitation tokens. Bootstrap invitations remain manual.
 
 ## Your own app launcher
 
@@ -59,6 +77,8 @@ Edit `.env.deploy.local` for your installation. It is ignored by Git. Alternativ
 | Setting | Purpose | Default |
 | --- | --- | --- |
 | `PUBLIC_ORIGIN` | Required production HTTPS origin, such as `https://vpn.example.com` | Required for deployment |
+| `RESEND_FROM` | Optional bare sender email address for invitation delivery | Unset |
+| `RESEND_REPLY_TO` | Optional bare address for replies | Unset |
 | `LAUNCHER_ORIGIN` | Optional separate HTTPS origin for your custom, Access-protected app launcher | Unset |
 | `WORKER_NAME` | Cloudflare Worker resource name | `family-access` |
 | `SITE_NAME` | Browser title, portal heading and passkey display name | `Family Access` |
@@ -169,6 +189,7 @@ The source is organized as follows:
 | `src/config.ts` | Runtime setting defaults and lifetime bounds |
 | `src/store.ts`, `src/schema.ts` | Transactional SQLite access and schema initialization |
 | `scripts/configure.mjs` | Validated deployment config generation |
+| `src/email.ts` | Resend invitation templates, validation and bounded idempotent delivery |
 | `src/launcher.ts` | Custom launcher rendering and Access JWT verification |
 | `src/oidc.ts` | OIDC flow, signing keys, throttling and expired-record cleanup |
 | `scripts/configure-access.mjs` | Optional, scoped Access API provisioning |
@@ -191,5 +212,5 @@ Never commit `.env.deploy.local`, `.dev.vars.local`, invitation tokens, signing 
 
 1. Independent OIDC conformance/security review and real Cloudflare Access interoperability validation.
 2. Credential/session administration, audit events and recovery policy.
-3. Invite-only Sign in with Apple linking and Resend delivery.
+3. Invite-only Sign in with Apple linking and delivery webhooks/queueing.
 4. Deployment-specific external rollout tests and network changes, if desired.

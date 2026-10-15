@@ -94,7 +94,7 @@ test('OIDC migration preserves the previous passkey schema and existing users',a
  const {schemaV1}=await import('../src/schema.ts');const sql=new DatabaseSync(':memory:');
  sql.exec(schemaV1);sql.exec("CREATE TABLE schema_version(version INTEGER PRIMARY KEY);INSERT INTO schema_version VALUES(1);INSERT INTO users(id,email,name,role,created_at) VALUES('existing','existing@example.com','Existing','admin',1)");
  sql.prepare('INSERT INTO passkeys(id,user_id,public_key,counter,device_type,created_at) VALUES(?,?,?,?,?,?)').run('key','existing',Buffer.from([1,2,3]),4,'singleDevice',1);
- new DB(sql);assert.equal(sql.prepare('SELECT counter FROM passkeys WHERE id=?').get('key').counter,4);assert.equal(sql.prepare('SELECT MAX(version) AS v FROM schema_version').get().v,2);
+ new DB(sql);assert.equal(sql.prepare('SELECT counter FROM passkeys WHERE id=?').get('key').counter,4);assert.equal(sql.prepare('SELECT MAX(version) AS v FROM schema_version').get().v,3);
  assert.ok(sql.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='oidc_keys'").get());
 });
 test('OIDC expired codes and disabled accounts cannot obtain identity tokens',async()=>{
@@ -105,4 +105,35 @@ test('OIDC expired codes and disabled accounts cannot obtain identity tokens',as
  const exchange=code=>worker.fetch(new Request(origin+'/oidc/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'authorization_code',client_id:'family-access',client_secret:f.env.OIDC_CLIENT_SECRET,redirect_uri:callback,code_verifier:verifier,code})}),f.env);
  insert('expired',1);assert.equal((await exchange('expired')).status,400);
  insert('disabled',Math.floor(Date.now()/1000)+100);f.env.DB.sql.exec('UPDATE users SET active=0');assert.equal((await exchange('disabled')).status,400);
+});
+
+test('invitations expose private links, enforce concurrent cooldown and preserve one-time enrollment',async()=>{
+ const f=fixture();const {cookie}=await enroll(f);
+ const replies=await Promise.all([f.call('/api/admin/invite',{email:'family@example.com'},cookie),f.call('/api/admin/invite',{email:'family@example.com'},cookie)]);
+ assert.deepEqual(replies.map(r=>r.status).sort(),[200,429]);const result=await replies.find(r=>r.status===200).json();
+ assert.equal(result.delivery,'manual');const url=new URL(result.invitation_url);assert.equal(new URLSearchParams(url.hash.slice(1)).get('invite'),result.token);
+ const o=await (await f.call('/api/register/options',{token:result.token,name:'Family'})).json();assert.ok(o.options.challenge);
+ // Keep three attempts inside an hour, moving each beyond the per-minute cooldown.
+ for(let n=0;n<2;n++){f.env.DB.sql.exec("UPDATE invites SET created_at=created_at-61 WHERE role='family'");assert.equal((await f.call('/api/admin/invite',{email:'family@example.com'},cookie)).status,200);}
+ f.env.DB.sql.exec("UPDATE invites SET created_at=created_at-61 WHERE role='family'");assert.equal((await f.call('/api/admin/invite',{email:'family@example.com'},cookie)).status,429);
+});
+test('administrator email invitation sends only after authorization and keeps fallback on provider rejection',async(t)=>{
+ const f=fixture();const {cookie}=await enroll(f);Object.assign(f.env,{RESEND_FROM:'invites@mail.example.com',RESEND_API_KEY:'fake-key'});
+ // A matching HTTPS origin is required before outbound delivery is enabled.
+ assert.equal((await f.call('/api/admin/invite',{email:'family@example.com',send_email:true},cookie)).status,503);
+ const httpsOrigin='https://vpn.example.com';f.env.PUBLIC_ORIGIN=httpsOrigin;
+ const call=(email,cookieValue)=>worker.fetch(new Request(httpsOrigin+'/api/admin/invite',{method:'POST',headers:{origin:httpsOrigin,'content-type':'application/json',...(cookieValue?{cookie:cookieValue}:{})},body:JSON.stringify({email,send_email:true})}),f.env);
+ let sends=0;const original=globalThis.fetch;t.after(()=>{globalThis.fetch=original;});globalThis.fetch=async()=>{sends++;return new Response('',{status:sends===1?200:403});};
+ assert.equal((await call('family@example.com')).status,403);assert.equal(sends,0);
+ const accepted=await (await call('family@example.com',cookie)).json();assert.equal(accepted.delivery,'accepted');assert.equal(sends,1);
+ const failed=await (await call('other@example.com',cookie)).json();assert.equal(failed.delivery,'failed');assert.ok(failed.invitation_url);assert.ok(failed.token);assert.equal(sends,2);
+});
+test('portal consumes invitation fragments without an automatic enrollment request',async()=>{
+ const f=fixture();const html=await (await f.call('/')).text();assert.match(html,/location.hash.slice\(1\)/);assert.match(html,/history.replaceState/);assert.match(html,/Create and email invitation/);
+ const script=html.match(/<script>([\s\S]*)<\/script>/)[1];new Function(script);
+});
+test('email schema migration preserves existing v2 invitations and passkey accounts',async()=>{
+ const {schemaV1,schemaV2}=await import('../src/schema.ts');const sql=new DatabaseSync(':memory:');sql.exec(schemaV1);sql.exec(schemaV2);sql.exec('CREATE TABLE schema_version(version INTEGER PRIMARY KEY);INSERT INTO schema_version VALUES(2)');
+ sql.prepare('INSERT INTO invites(token_hash,email,role,expires_at,created_by) VALUES(?,?,?,?,?)').run('existing-hash','family@example.com','family',2000000000,'existing-admin');
+ new DB(sql);const invite=sql.prepare('SELECT * FROM invites').get();assert.equal(invite.token_hash,'existing-hash');assert.equal(invite.expires_at,2000000000);assert.equal(invite.created_at,0);assert.equal(sql.prepare('SELECT MAX(version) AS v FROM schema_version').get().v,3);
 });

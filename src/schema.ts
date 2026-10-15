@@ -24,3 +24,9 @@ CREATE TABLE oidc_keys (
 CREATE UNIQUE INDEX oidc_one_active_key ON oidc_keys(active) WHERE active=1;
 CREATE TABLE rate_limits (key TEXT PRIMARY KEY, count INTEGER NOT NULL, reset_at INTEGER NOT NULL);
 `;
+
+// Existing invitations remain valid; zero timestamps predate rate-limit accounting.
+export const schemaV3 = `
+ALTER TABLE invites ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX invites_recipient_created_idx ON invites(email,created_by,created_at);
+`;

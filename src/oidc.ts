@@ -59,7 +59,7 @@ export function cleanup(env:AuthEnv) {
  const row=env.DB.prepare("INSERT INTO rate_limits(key,count,reset_at) VALUES('cleanup',1,?) ON CONFLICT(key) DO UPDATE SET reset_at=excluded.reset_at WHERE rate_limits.reset_at<=? RETURNING key").bind(now()+60,now()).first();
  if(!row)return;
  for(const table of ['oidc_requests','oidc_codes','oidc_tokens','sessions','challenges'])env.DB.prepare(`DELETE FROM ${table} WHERE expires_at<=?`).bind(now()).run();
- env.DB.prepare('DELETE FROM invites WHERE expires_at<=? AND role<>?').bind(now(),'admin').run();
+ env.DB.prepare('DELETE FROM invites WHERE expires_at<=? AND role<>? AND created_at<=?').bind(now(),'admin',now()-3600).run();
  env.DB.prepare('DELETE FROM oidc_keys WHERE active=0 AND retired_at<?').bind(now()-86400).run();
 }
 type Authorization={client_id:string;redirect_uri:string;scope:string;state:string;nonce:string|null;challenge:string;max_age:number|null;require_reauth:number;previous_session_hash:string|null};

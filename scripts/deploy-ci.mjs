@@ -13,7 +13,7 @@ const directory=mkdtempSync(join(tmpdir(),'worker-deploy-'));
 try {
   const args=['node_modules/wrangler/bin/wrangler.js','deploy','--config','wrangler.deploy.json','--env',''];
   const secrets={};
-  for(const key of ['ADMIN_SETUP_SECRET','OIDC_CLIENT_SECRET'])if(process.env[key])secrets[key]=process.env[key];
+  for(const key of ['ADMIN_SETUP_SECRET','OIDC_CLIENT_SECRET','RESEND_API_KEY'])if(process.env[key])secrets[key]=process.env[key];
   if(Object.keys(secrets).length) {
     const secretFile=join(directory,'secrets.json');
     writeFileSync(secretFile,JSON.stringify(secrets),{mode:0o600});

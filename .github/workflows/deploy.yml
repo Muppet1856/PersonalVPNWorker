@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
+      RESEND_FROM: ${{ vars.RESEND_FROM || secrets.RESEND_FROM }}
+      RESEND_REPLY_TO: ${{ vars.RESEND_REPLY_TO || secrets.RESEND_REPLY_TO }}
       LAUNCHER_ORIGIN: ${{ vars.LAUNCHER_ORIGIN || secrets.LAUNCHER_ORIGIN }}
       ACCESS_TEAM_DOMAIN: ${{ vars.ACCESS_TEAM_DOMAIN || secrets.ACCESS_TEAM_DOMAIN }}
       OIDC_CLIENT_ID: ${{ vars.OIDC_CLIENT_ID || secrets.OIDC_CLIENT_ID }}
@@ -46,6 +48,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
           OIDC_CLIENT_SECRET: ${{ secrets.OIDC_CLIENT_SECRET }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           ADMIN_SETUP_SECRET: ${{ secrets.ADMIN_SETUP_SECRET }}
         run: node scripts/deploy-ci.mjs
       - name: Verify deployed OIDC endpoints

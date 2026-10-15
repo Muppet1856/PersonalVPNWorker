@@ -27,6 +27,10 @@ export function deploymentConfig(env, base) {
   config.vars.ACCESS_TEAM_DOMAIN=access.team;
   config.vars.OIDC_CLIENT_ID=access.clientID;
   config.vars.APP_LINKS_JSON=JSON.stringify(access.apps.map(app=>({name:app.name,url:'https://'+app.domain})));
+  for(const name of ['RESEND_FROM','RESEND_REPLY_TO'])if(env[name]){
+    if(!/^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z]{2,63}$/.test(env[name]))throw Error(`${name} must be a bare email address`);
+    config.vars[name]=env[name];
+  }
   // Only explicitly listed nonsecret settings are copied, never process.env wholesale.
   return config;
 }
