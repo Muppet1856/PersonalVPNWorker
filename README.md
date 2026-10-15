@@ -2,7 +2,7 @@
 
 An invite-only, passkey-based access portal you can deploy on your own domain using **Cloudflare Workers and a SQLite-backed Durable Object**. It is designed for small private groups such as families and home labs. Branding, domain, Worker name and authentication lifetimes are configurable; no personal domain is built into the application.
 
-Despite the repository name, this project currently provides **authentication**, not a VPN tunnel. The planned Cloudflare Access integration will protect selected web applications. Network-level VPN access remains a separate service.
+Despite the repository name, this project currently provides **authentication**, not a VPN tunnel. The Cloudflare Access integration can protect selected web applications. Network-level VPN access remains a separate service.
 
 ## Current milestone
 
