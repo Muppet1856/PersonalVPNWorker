@@ -5,7 +5,7 @@ import {
 
 import { SqlStore } from './store.ts';
 
-export type AuthEnv = { DB: SqlStore; PUBLIC_ORIGIN: string; RP_ID: string; ADMIN_SETUP_SECRET?: string };
+export type AuthEnv = { DB: SqlStore; PUBLIC_ORIGIN: string; RP_ID: string; SITE_NAME?: string; ADMIN_SETUP_SECRET?: string };
 type User = { id:string; email:string; name:string; role:string; active:number };
 type Challenge = { id:string; user_id:string; challenge:string; expires_at:number; registration_user_id?:string; display_name?:string };
 type KeyRow = { id:string; user_id:string; public_key:ArrayBuffer; counter:number; transports:string };
@@ -35,7 +35,9 @@ class InputError extends Error {constructor(message:string,readonly status:numbe
 function requireOrigin(req:Request,env:AuthEnv):boolean {const origin=req.headers.get('origin');return origin===env.PUBLIC_ORIGIN;}
 function html(content:string){return new Response(content,{headers:{'content-type':'text/html; charset=utf-8','cache-control':'no-store','content-security-policy':"default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",'x-content-type-options':'nosniff','referrer-policy':'no-referrer'}});}
 async function issueSession(userId:string,env:AuthEnv){const token=rand()+rand();await env.DB.prepare('INSERT INTO sessions(token_hash,user_id,expires_at,created_at) VALUES(?,?,?,?)').bind(await digest(token),userId,now()+604800,now()).run();return token;}
-const page=`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Zellen Family Access</title><style>body{font:16px system-ui;background:#101827;color:#e8f1fb;max-width:670px;margin:3rem auto;padding:0 1rem}article{background:#202c3d;border-radius:14px;padding:22px;margin-bottom:18px}input,button{padding:12px;border-radius:8px;margin:6px 4px 6px 0;font:inherit}input{width:min(95%,370px)}button{cursor:pointer;background:#58c0a7;border:0}small{color:#a9b5c7}pre{white-space:pre-wrap}</style><h1>🔐 Zellen Family Access</h1><p>Family passkey authentication · Milestone 1</p><article id="me">Checking session...</article><article><h3>Sign in</h3><input id="email" type="email" placeholder="Email address" autocomplete="username webauthn"><button id="login">Sign in with passkey</button></article><article><h3>Accept family invitation</h3><input id="invite" placeholder="Invitation token"><input id="displayName" placeholder="Display name"><button id="register">Create account with passkey</button><small>Invitations are issued by the administrator. One passkey is enrolled during registration.</small></article><article id="admin" hidden><h3>Invite family member</h3><input id="newEmail" type="email" placeholder="Email address"><button id="createInvite">Create invitation</button><small>Copy the token privately to your family member. Automated email delivery is a later milestone.</small></article><article><button id="logout">Sign out</button><pre id="message" role="status"></pre></article><script>
+const siteName=(env:AuthEnv)=>env.SITE_NAME?.trim() || 'Zellen Family Access';
+const escapeHtml=(text:string)=>text.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
+const page=(name:string)=>`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(name)}</title><style>body{font:16px system-ui;background:#101827;color:#e8f1fb;max-width:670px;margin:3rem auto;padding:0 1rem}article{background:#202c3d;border-radius:14px;padding:22px;margin-bottom:18px}input,button{padding:12px;border-radius:8px;margin:6px 4px 6px 0;font:inherit}input{width:min(95%,370px)}button{cursor:pointer;background:#58c0a7;border:0}small{color:#a9b5c7}pre{white-space:pre-wrap}</style><h1>🔐 ${escapeHtml(name)}</h1><p>Family passkey authentication · Milestone 1</p><article id="me">Checking session...</article><article><h3>Sign in</h3><input id="email" type="email" placeholder="Email address" autocomplete="username webauthn"><button id="login">Sign in with passkey</button></article><article><h3>Accept family invitation</h3><input id="invite" placeholder="Invitation token"><input id="displayName" placeholder="Display name"><button id="register">Create account with passkey</button><small>Invitations are issued by the administrator. One passkey is enrolled during registration.</small></article><article id="admin" hidden><h3>Invite family member</h3><input id="newEmail" type="email" placeholder="Email address"><button id="createInvite">Create invitation</button><small>Copy the token privately to your family member. Automated email delivery is a later milestone.</small></article><article><button id="logout">Sign out</button><pre id="message" role="status"></pre></article><script>
 const $=id=>document.getElementById(id);const say=x=>$('message').textContent=typeof x==='string'?x:JSON.stringify(x,null,2);
 const b64=bytes=>{let s='';for(const x of new Uint8Array(bytes))s+=String.fromCharCode(x);return btoa(s).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'')};
 const bytes=s=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));
@@ -52,7 +54,7 @@ $('logout').onclick=async()=>{try{await api('/api/logout',{});say('Signed out');
 export default {async fetch(req:Request,env:AuthEnv):Promise<Response>{
  try{
  const path=new URL(req.url).pathname;
- if(req.method==='GET'&&path==='/')return html(page);
+ if(req.method==='GET'&&path==='/')return html(page(siteName(env)));
  if(req.method==='GET'&&path==='/health')return json({status:'ok'});
  if(req.method==='GET'&&path==='/api/me'){const u=await session(req,env);return json({user:u});}
  if(req.method!=='POST')return failure('Not found',404);
@@ -69,7 +71,7 @@ export default {async fetch(req:Request,env:AuthEnv):Promise<Response>{
   const token=String(data.token||'');const inv=await env.DB.prepare('SELECT email,role FROM invites WHERE token_hash=? AND used_at IS NULL AND expires_at>?').bind(await digest(token),now()).first<{email:string;role:string}>();if(!inv)return failure('Invitation invalid or expired',403);
   const name=String(data.name||'').trim();if(name.length<2||name.length>100)return failure('Invalid display name');
   if(await env.DB.prepare('SELECT id FROM users WHERE email=?').bind(inv.email).first())return failure('Account already exists',409);
-  const id=rand();const options=await generateRegistrationOptions({rpName:'Zellen Family Access',rpID:env.RP_ID,userName:inv.email,userDisplayName:name,userID:encoder.encode(id),attestationType:'none',authenticatorSelection:{residentKey:'preferred',userVerification:'required'},excludeCredentials:[]});
+  const id=rand();const options=await generateRegistrationOptions({rpName:siteName(env),rpID:env.RP_ID,userName:inv.email,userDisplayName:name,userID:encoder.encode(id),attestationType:'none',authenticatorSelection:{residentKey:'preferred',userVerification:'required'},excludeCredentials:[]});
   const flow=rand();await env.DB.prepare('INSERT INTO challenges(id,user_id,kind,challenge,expires_at,registration_user_id,display_name) VALUES(?,?,?,?,?,?,?)').bind(flow,await digest(token),'register',options.challenge,now()+300,id,name).run();return json({flow,options});
  }
  if(path==='/api/register/verify'){

@@ -4,6 +4,12 @@ Invite-only passkey authentication for **vpn.zellen.me**, running on Cloudflare 
 
 This is a working authentication milestone. It does not yet provide OIDC federation to Cloudflare Access, Sign in with Apple, or Resend delivery. Keep existing access arrangements while those milestones are completed.
 
+## Site settings
+
+Set `SITE_NAME` in `wrangler.jsonc` → `vars` to change the browser title, portal heading, and name shown when creating a passkey. The default is `Zellen Family Access`. The `env.local.vars` value controls local development separately. The value is plain text and is escaped when rendered into HTML.
+
+`PUBLIC_ORIGIN` is the full site URL (`https://vpn.zellen.me`); `RP_ID` is the passkey hostname (`vpn.zellen.me`). These are separate from the display name. Changing only `SITE_NAME` preserves existing passkey validity.
+
 ## Local development
 
 Use Node.js 24 and npm.

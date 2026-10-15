@@ -9,7 +9,8 @@
   "workers_dev": false,
   "vars": {
     "PUBLIC_ORIGIN": "https://vpn.zellen.me",
-    "RP_ID": "vpn.zellen.me"
+    "RP_ID": "vpn.zellen.me",
+    "SITE_NAME": "Zellen Family Access"
   },
   "routes": [
     {
@@ -24,7 +25,8 @@
       "routes": [],
       "vars": {
         "PUBLIC_ORIGIN": "http://localhost:8787",
-        "RP_ID": "localhost"
+        "RP_ID": "localhost",
+        "SITE_NAME": "Zellen Family Access"
       },
       "durable_objects": {
         "bindings": [
