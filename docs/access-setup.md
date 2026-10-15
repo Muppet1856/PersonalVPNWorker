@@ -28,7 +28,7 @@ Example application configuration:
 ]
 ```
 
-Use existing application hostnames whose DNS/tunnels already work. Do not include the identity portal or team hostname, schemes, paths or wildcards. The same list populates the signed-in portal's app links. An empty list provisions only the identity provider.
+Use existing application hostnames whose DNS/tunnels already work. Do not include the identity portal or team hostname, schemes, paths or wildcards. The same list populates the signed-in portal's app links. An empty list provisions only the identity provider, plus the launcher if configured.
 
 The Access token needs account permissions for **Access: Organizations, Identity Providers, and Groups Write** and **Access: Apps and Policies Write**, including their corresponding read access, scoped to the target account. The normal Worker deployment token stays separate. This script does not need DNS, tunnel, billing or Worker-edit permissions on its Access token. Do not add the Access token as a Worker runtime secret.
 
@@ -57,6 +57,22 @@ The provider is named `<client-id> (PersonalVPNWorker)`. Managed applications ar
 The script is repeatable but not transactional across Cloudflare resources. A failure may leave earlier resources configured; fix the reported cause and rerun. New applications default to denied access until their allow policy is saved. Existing applications or policies that do not match this project's ownership convention cause the script to stop before writes; it does not adopt or overwrite them. Removing an app from the list does not delete its existing protection. Keep managed names/client IDs stable; review renames manually.
 
 Disable Cloudflare Workers Builds if GitHub Actions is the deployment authority for this Worker. Test from outside local DNS overrides, preferably a private browser on cellular. Local DNS and reverse-proxy access remain unchanged.
+
+## Custom application launcher
+
+Add the repository variable `LAUNCHER_ORIGIN=https://access.example.com`. Keep `PUBLIC_ORIGIN` and `RP_ID` on your existing authentication hostname; changing them would change passkey scope. Do not add the launcher domain to `ACCESS_APPS_JSON`; that list contains the destination tiles.
+
+With `CONFIGURE_ACCESS=true`, the deploy workflow adds the launcher custom domain, creates a separate managed Access application for it, and uploads that application's audience as the `LAUNCHER_ACCESS_AUD` Worker secret through Wrangler. The Access token handles Access resources; the deployment token handles the Worker secret. The launcher checks the RS256 signature, issuer, audience and expiry of Cloudflare's assertion and exposes no authentication API on its hostname. It shows no application list until verification succeeds.
+
+Visit the launcher, authenticate at your existing passkey hostname, then return to your application tiles. Cloudflare's team domain may appear during authentication; it remains the callback domain and is not replaced by the launcher. Destination applications still enforce their own Access policies.
+
+For manual setup, create a self-hosted Access application for the exact launcher hostname with the same member policy, copy its Application Audience (AUD), and run:
+
+```sh
+npx wrangler secret put LAUNCHER_ACCESS_AUD --config wrangler.deploy.json --env ""
+```
+
+Paste the audience when prompted. Custom-domain provisioning requires the deployment token's existing zone/domain permissions and no conflicting DNS record. A failed provisioning or audience-binding step leaves the launcher unavailable; fix it and rerun the workflow.
 
 ## Manual Cloudflare setup
 

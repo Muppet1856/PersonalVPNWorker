@@ -1,12 +1,13 @@
+import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { accessSettings } from './access-config.mjs';
 
 export async function configureAccess(env,{apply=false,fetcher=fetch,log=console.log}={}) {
  if(!env.PUBLIC_ORIGIN)throw Error('Set PUBLIC_ORIGIN');
  const origin=new URL(env.PUBLIC_ORIGIN);if(origin.protocol!=='https:'||origin.origin!==env.PUBLIC_ORIGIN)throw Error('PUBLIC_ORIGIN must be a canonical HTTPS origin');
- const {team,clientID,apps}=accessSettings(env);if(!team)throw Error('Set ACCESS_TEAM_DOMAIN to your existing Zero Trust team hostname');
+ const {team,clientID,apps,launcher}=accessSettings(env);const targetsApps=launcher?[...apps,launcher]:apps;if(!team)throw Error('Set ACCESS_TEAM_DOMAIN to your existing Zero Trust team hostname');
  const managedName=`${clientID} (PersonalVPNWorker)`;
- const plan={identity_provider:{name:managedName,type:'oidc',client_id:clientID,auth_url:origin.origin+'/oidc/authorize',token_url:origin.origin+'/oidc/token',certs_url:origin.origin+'/oidc/jwks',pkce_enabled:true},callback:`https://${team}/cdn-cgi/access/callback`,applications:apps.map(app=>({name:`${clientID}: ${app.name}`,domain:app.domain,policy:'Allow active invited members via this OIDC provider'}))};
+ const plan={identity_provider:{name:managedName,type:'oidc',client_id:clientID,auth_url:origin.origin+'/oidc/authorize',token_url:origin.origin+'/oidc/token',certs_url:origin.origin+'/oidc/jwks',pkce_enabled:true},callback:`https://${team}/cdn-cgi/access/callback`,applications:targetsApps.map(app=>({name:`${clientID}: ${app.name}`,domain:app.domain,policy:'Allow active invited members via this OIDC provider'}))};
  if(!apply){log(JSON.stringify(plan,null,2));return plan;}
  if(!env.CLOUDFLARE_ACCESS_API_TOKEN||!env.CLOUDFLARE_ACCOUNT_ID)throw Error('Set CLOUDFLARE_ACCESS_API_TOKEN and CLOUDFLARE_ACCOUNT_ID');
  if(!env.OIDC_CLIENT_SECRET||env.OIDC_CLIENT_SECRET.length<32)throw Error('Set OIDC_CLIENT_SECRET to at least 32 random characters');
@@ -29,7 +30,7 @@ export async function configureAccess(env,{apply=false,fetcher=fetch,log=console
  const matches=idps.filter(x=>x.name===managedName);if(matches.length>1)throw Error('Multiple managed identity providers found');
  const existingIDP=matches[0];if(existingIDP&&(existingIDP.type!=='oidc'||existingIDP.config?.client_id!==clientID||existingIDP.config?.auth_url!==plan.identity_provider.auth_url||existingIDP.config?.token_url!==plan.identity_provider.token_url||existingIDP.config?.certs_url!==plan.identity_provider.certs_url))throw Error('Existing identity provider conflicts with managed configuration');
  const targets=[];
- for(const app of apps) {
+ for(const app of targetsApps) {
   const name=`${clientID}: ${app.name}`;
   const matches=existingApps.filter(x=>x.domain===app.domain);
   if(matches.length>1)throw Error(`Multiple Access applications already protect ${app.domain}`);
@@ -48,11 +49,15 @@ export async function configureAccess(env,{apply=false,fetcher=fetch,log=console
   const saved=(await api(existing?`/apps/${existing.id}`:'/apps',existing?'PUT':'POST',body)).result;
   if(!saved?.id)throw Error('Cloudflare did not return an application ID');
   await api(`/apps/${saved.id}/policies${policy?'/'+policy.id:''}`,policy?'PUT':'POST',{name:`${clientID}: Members`,decision:'allow',precedence:1,include:[{login_method:{id:idp.id}}],exclude:[],require:[]});
+  if(launcher&&app.domain===launcher.domain){
+   if(typeof saved.aud!=='string'||! /^[a-f0-9]{64}$/i.test(saved.aud))throw Error('Cloudflare did not return a valid launcher audience');
+   plan.launcher_access_aud=saved.aud;
+  }
   log(`Configured Access protection for ${app.domain}.`);
  }
  log('Access setup complete. Omitted applications and unrelated account settings were not changed.');
  return plan;
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href) {
- try{await configureAccess(process.env,{apply:process.argv.includes('--apply')});}catch(error){console.error(error.message);process.exitCode=1;}
+ try{const plan=await configureAccess(process.env,{apply:process.argv.includes('--apply')});if(plan.launcher_access_aud&&process.env.GITHUB_OUTPUT)appendFileSync(process.env.GITHUB_OUTPUT,`launcher_access_aud=${plan.launcher_access_aud}\n`);}catch(error){console.error(error.message);process.exitCode=1;}
 }

@@ -23,6 +23,7 @@ export function deploymentConfig(env, base) {
     config.vars[name]=String(value);
   }
   const access=accessSettings({...env,PUBLIC_ORIGIN:origin.origin});
+  if(access.launcher){config.routes.push({pattern:access.launcher.domain,custom_domain:true});config.vars.LAUNCHER_ORIGIN=env.LAUNCHER_ORIGIN;}
   config.vars.ACCESS_TEAM_DOMAIN=access.team;
   config.vars.OIDC_CLIENT_ID=access.clientID;
   config.vars.APP_LINKS_JSON=JSON.stringify(access.apps.map(app=>({name:app.name,url:'https://'+app.domain})));

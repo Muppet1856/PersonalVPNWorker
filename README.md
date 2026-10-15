@@ -38,6 +38,14 @@ Paste the returned token into **Accept family invitation**, enter your display n
 
 After creating your administrator passkey, follow [Cloudflare Access setup](docs/access-setup.md). The optional GitHub deployment step can configure the identity provider, self-hosted applications and member allow policies using Cloudflare's API. It defaults to **off**. The Worker’s discovery and public-key endpoints are checked after each deployment, even before an Access client is configured.
 
+## Your own app launcher
+
+Set `LAUNCHER_ORIGIN=https://access.example.com` to serve a branded application grid on a separate custom domain. Keep `PUBLIC_ORIGIN=https://vpn.example.com` and `RP_ID=vpn.example.com` for passkey authentication. The same Worker serves both hosts; existing passkeys keep their original scope.
+
+Tiles come from `ACCESS_APPS_JSON`. The launcher has its own Access application and verifies Cloudflare's signed assertion before displaying links. With `CONFIGURE_ACCESS=true`, deployment provisions that application and binds its audience automatically using Wrangler. Until configuration completes, the launcher returns an unavailable response. See [launcher setup](docs/access-setup.md#custom-application-launcher).
+
+The Cloudflare team hostname remains part of authentication redirects; this launcher supplies your own landing page rather than masking those redirects.
+
 ## Configuration
 
 Copy the deployment template:
@@ -51,6 +59,7 @@ Edit `.env.deploy.local` for your installation. It is ignored by Git. Alternativ
 | Setting | Purpose | Default |
 | --- | --- | --- |
 | `PUBLIC_ORIGIN` | Required production HTTPS origin, such as `https://vpn.example.com` | Required for deployment |
+| `LAUNCHER_ORIGIN` | Optional separate HTTPS origin for your custom, Access-protected app launcher | Unset |
 | `WORKER_NAME` | Cloudflare Worker resource name | `family-access` |
 | `SITE_NAME` | Browser title, portal heading and passkey display name | `Family Access` |
 | `RP_ID` | WebAuthn relying-party hostname | Hostname from `PUBLIC_ORIGIN` |
@@ -160,6 +169,7 @@ The source is organized as follows:
 | `src/config.ts` | Runtime setting defaults and lifetime bounds |
 | `src/store.ts`, `src/schema.ts` | Transactional SQLite access and schema initialization |
 | `scripts/configure.mjs` | Validated deployment config generation |
+| `src/launcher.ts` | Custom launcher rendering and Access JWT verification |
 | `src/oidc.ts` | OIDC flow, signing keys, throttling and expired-record cleanup |
 | `scripts/configure-access.mjs` | Optional, scoped Access API provisioning |
 | `.env.deploy.example` | Portable nonsecret deployment template |

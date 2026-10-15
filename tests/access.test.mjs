@@ -45,3 +45,9 @@ test('Access refuses to take over a same-named provider for another issuer',asyn
  const m=mock();m.state.idps=[{id:'other',name:'family-access (PersonalVPNWorker)',type:'oidc',config:{client_id:'family-access',auth_url:'https://other.example/oidc/authorize'}}];
  await assert.rejects(configureAccess(env,{apply:true,fetcher:m.fetcher,log:()=>{}}),/conflicts/);assert.ok(m.state.calls.every(x=>x.method==='GET'));
 });
+test('launcher is protected as a separate application and returns its audience',async()=>{
+ const m=mock();const fetcher=async(url,init)=>{const response=await m.fetcher(url,init);const data=await response.json();if(init.method!=='GET'&&data.result?.domain==='access.example.com')data.result.aud='a'.repeat(64);return Response.json(data);};
+ const plan=await configureAccess({...env,LAUNCHER_ORIGIN:'https://access.example.com'},{apply:true,fetcher,log:()=>{}});
+ assert.equal(plan.launcher_access_aud,'a'.repeat(64));assert.equal(plan.applications.length,2);
+ const launcher=m.state.calls.find(x=>x.method==='POST'&&x.body?.domain==='access.example.com');assert.deepEqual(launcher.body.allowed_idps,['idp-1']);
+});

@@ -17,6 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
+      LAUNCHER_ORIGIN: ${{ vars.LAUNCHER_ORIGIN || secrets.LAUNCHER_ORIGIN }}
       ACCESS_TEAM_DOMAIN: ${{ vars.ACCESS_TEAM_DOMAIN || secrets.ACCESS_TEAM_DOMAIN }}
       OIDC_CLIENT_ID: ${{ vars.OIDC_CLIENT_ID || secrets.OIDC_CLIENT_ID }}
       ACCESS_APPS_JSON: ${{ vars.ACCESS_APPS_JSON || secrets.ACCESS_APPS_JSON }}
@@ -50,9 +51,17 @@ jobs:
       - name: Verify deployed OIDC endpoints
         run: node scripts/verify-oidc.mjs
       - name: Configure Cloudflare Access (opt-in)
+        id: access
         if: vars.CONFIGURE_ACCESS == 'true'
         env:
           CLOUDFLARE_ACCESS_API_TOKEN: ${{ secrets.CLOUDFLARE_ACCESS_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
           OIDC_CLIENT_SECRET: ${{ secrets.OIDC_CLIENT_SECRET }}
         run: node scripts/configure-access.mjs --apply
+      - name: Bind launcher Access audience with Wrangler
+        if: steps.access.outputs.launcher_access_aud != ''
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+          LAUNCHER_ACCESS_AUD: ${{ steps.access.outputs.launcher_access_aud }}
+        run: node scripts/set-launcher-audience.mjs

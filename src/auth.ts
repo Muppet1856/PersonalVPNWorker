@@ -7,7 +7,7 @@ import { SqlStore } from './store.ts';
 import { settings, type Settings } from './config.ts';
 import { handleOIDC, throttle, cleanup, oidcConfigured } from './oidc.ts';
 
-export type AuthEnv = Settings & { DB: SqlStore; PUBLIC_ORIGIN: string; RP_ID: string; ADMIN_SETUP_SECRET?: string; ACCESS_TEAM_DOMAIN?: string; OIDC_CLIENT_ID?: string; OIDC_CLIENT_SECRET?: string; APP_LINKS_JSON?: string };
+export type AuthEnv = Settings & { DB: SqlStore; PUBLIC_ORIGIN: string; RP_ID: string; ADMIN_SETUP_SECRET?: string; ACCESS_TEAM_DOMAIN?: string; OIDC_CLIENT_ID?: string; OIDC_CLIENT_SECRET?: string; APP_LINKS_JSON?: string; LAUNCHER_ORIGIN?: string; LAUNCHER_ACCESS_AUD?: string };
 export type User = { id:string; email:string; name:string; role:string; active:number; auth_time:number };
 type Challenge = { id:string; user_id:string; challenge:string; expires_at:number; registration_user_id?:string; display_name?:string };
 type KeyRow = { id:string; user_id:string; public_key:ArrayBuffer; counter:number; transports:string };

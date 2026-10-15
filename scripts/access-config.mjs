@@ -12,5 +12,12 @@ export function accessSettings(env) {
   if(seen.has(domain))throw Error('Duplicate Access application domain');seen.add(domain);
   return {name:app.name.trim(),domain};
  });
- return {team,clientID,apps};
+ let launcher;
+ if(env.LAUNCHER_ORIGIN){
+  const url=new URL(env.LAUNCHER_ORIGIN);
+  if(url.protocol!=='https:'||url.origin!==env.LAUNCHER_ORIGIN||url.username||url.password||url.port||!url.hostname.includes('.')||!url.hostname.split('.').every(part=>/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(part)))throw Error('LAUNCHER_ORIGIN must be a canonical HTTPS origin');
+  if(url.hostname===origin.hostname||url.hostname===team||seen.has(url.hostname))throw Error('Launcher must have its own domain, separate from authentication and application tiles');
+  launcher={name:'Application launcher',domain:url.hostname};
+ }
+ return {team,clientID,apps,launcher};
 }
