@@ -120,7 +120,7 @@ Fork this repository into your own GitHub account, enable Actions if GitHub prom
 
 Actions settings are scoped to repositories, organizations or deployment environments, not automatically to whichever GitHub user clicks Run workflow. If several people share one repository and need separate deployments, use separate GitHub environments with their own settings and a workflow that explicitly selects the target environment; the included workflow deploys one installation per repository.
 
-All other settings in the configuration table can also be supplied as repository variables. Empty optional variables use the documented defaults. Repository settings are private to your installation; generic examples remain in source.
+All other settings in the configuration table can also be supplied as repository variables. The deployment workflow also accepts these settings as repository secrets if preferred; a nonempty variable takes precedence over a secret of the same name. `CLOUDFLARE_ACCOUNT_ID` accepts either location too. Keep `CLOUDFLARE_API_TOKEN` and `ADMIN_SETUP_SECRET` as secrets. Empty optional variables use the documented defaults. Repository settings are private to your installation; generic examples remain in source.
 
 On deployment, Wrangler provisions/updates the Worker, custom domain and SQLite Durable Object binding. The optional bootstrap secret is sent using `--secrets-file` in the same deployment. It is written to a private temporary file, never printed, and removed when the deploy command finishes. Secrets absent from that file remain unchanged in Cloudflare.
 

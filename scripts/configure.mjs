@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 export function deploymentConfig(env, base) {
-  if(!env.PUBLIC_ORIGIN)throw Error('Set PUBLIC_ORIGIN in .env.deploy.local or your build environment');
+  if(!env.PUBLIC_ORIGIN)throw Error('Set PUBLIC_ORIGIN in .env.deploy.local, the build environment, or GitHub repository Actions Variables/Secrets');
   const origin=new URL(env.PUBLIC_ORIGIN);
   if(origin.protocol!=='https:' || origin.username || origin.password || origin.port || origin.pathname!=='/' || origin.search || origin.hash)throw Error('PUBLIC_ORIGIN must be an HTTPS origin without path, credentials, port, query or fragment');
   const workerName=env.WORKER_NAME || 'family-access';
