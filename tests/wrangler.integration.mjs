@@ -37,6 +37,9 @@ test('wrangler dev: portal, passkeys, sessions, invitations and replay rejection
     assert.ok(ready,`Wrangler did not become ready:\n${logs}`);
     const portal=await (await call('/')).text();assert.match(portal,/<title>CI Access<\/title>/);
     assert.ok(portal.includes('/assets/bootstrap-5.3.8.min.css'));
+    assert.ok(portal.includes('/assets/portal-icon-v1.svg'));
+    const favicon=await call('/favicon.ico');assert.equal(favicon.status,200);assert.match(favicon.headers.get('content-type'),/image\/x-icon/);assert.deepEqual([...new Uint8Array(await favicon.arrayBuffer()).slice(0,4)],[0,0,1,0]);
+    const touch=await call('/assets/portal-touch-v1.png');assert.equal(touch.status,200);assert.match(touch.headers.get('content-type'),/image\/png/);
     const stylesheet=await call('/assets/bootstrap-5.3.8.min.css');assert.equal(stylesheet.status,200);assert.match(stylesheet.headers.get('content-type'),/text\/css/);assert.match(stylesheet.headers.get('cache-control'),/immutable/);assert.match(await stylesheet.text(),/Bootstrap\s+v5\.3\.8/);
     assert.equal((await call('/api/setup',{},undefined,'https://untrusted.example')).status,403);
     const setup=await call('/api/setup',{email:'ci@example.com',secret:'ci-bootstrap-only'});assert.equal(setup.status,200);
