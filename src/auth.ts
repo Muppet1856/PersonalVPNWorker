@@ -47,7 +47,7 @@ async function body(req:Request):Promise<any>{
 class InputError extends Error {constructor(message:string,readonly status:number){super(message);}}
 
 function requireOrigin(req:Request,env:AuthEnv):boolean {const origin=req.headers.get('origin');return origin===env.PUBLIC_ORIGIN;}
-function html(content:string){return new Response(content,{headers:{'content-type':'text/html; charset=utf-8','cache-control':'no-store','content-security-policy':"default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",'x-content-type-options':'nosniff','referrer-policy':'no-referrer'}});}
+function html(content:string){return new Response(content,{headers:{'content-type':'text/html; charset=utf-8','cache-control':'no-store','content-security-policy':"default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",'x-content-type-options':'nosniff','referrer-policy':'no-referrer'}});}
 async function issueSession(userId:string,env:AuthEnv,ttl=settings(env).sessionTTL){const token=rand()+rand();const inserted=await env.DB.prepare('INSERT INTO sessions(token_hash,user_id,expires_at,created_at) SELECT ?,id,?,? FROM users WHERE id=? AND active=1').bind(await digest(token),now()+ttl,now(),userId).run();if(inserted.meta.changes!==1)throw new InputError('Account unavailable',403);return token;}
 const siteName=(env:AuthEnv)=>settings(env).siteName;
 const page=(name:string)=>portalShell(name)+`<script>
