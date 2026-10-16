@@ -30,7 +30,8 @@ export function manageUsers(req:Request,env:AuthEnv,actor:User|null,data?:Record
     env.DB.prepare("DELETE FROM sessions WHERE user_id=? AND EXISTS(SELECT 1 FROM users WHERE id=? AND active=0)").bind(target.id,target.id),
     env.DB.prepare('DELETE FROM oidc_codes WHERE user_id=?').bind(target.id),
     env.DB.prepare('DELETE FROM oidc_tokens WHERE user_id=?').bind(target.id),
-    env.DB.prepare('DELETE FROM challenges WHERE user_id=?').bind(target.id)
+    env.DB.prepare('DELETE FROM challenges WHERE user_id=?').bind(target.id),
+    env.DB.prepare('DELETE FROM email_logins WHERE user_id=?').bind(target.id)
    ]);
   }else if(data.action==='enable'){
    env.DB.prepare('UPDATE users SET active=1 WHERE id=?').bind(target.id).run();
@@ -39,7 +40,8 @@ export function manageUsers(req:Request,env:AuthEnv,actor:User|null,data?:Record
     env.DB.prepare('DELETE FROM sessions WHERE user_id=?').bind(target.id),
     env.DB.prepare('DELETE FROM oidc_codes WHERE user_id=?').bind(target.id),
     env.DB.prepare('DELETE FROM oidc_tokens WHERE user_id=?').bind(target.id),
-    env.DB.prepare('DELETE FROM challenges WHERE user_id=?').bind(target.id)
+    env.DB.prepare('DELETE FROM challenges WHERE user_id=?').bind(target.id),
+    env.DB.prepare('DELETE FROM email_logins WHERE user_id=?').bind(target.id)
    ]);
   }else return error('Invalid action');
   return json({ok:true});

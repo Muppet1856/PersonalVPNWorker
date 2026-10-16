@@ -9,7 +9,7 @@ const b64=(bytes:Uint8Array)=>btoa(String.fromCharCode(...bytes)).replace(/\+/g,
 const sha=async(value:string)=>b64(new Uint8Array(await crypto.subtle.digest('SHA-256',encoder.encode(value))));
 const cookie=(req:Request,name:string)=>req.headers.get('cookie')?.split(';').map(x=>x.trim()).find(x=>x.startsWith(name+'='))?.slice(name.length+1) || '';
 const flowCookieName='family_oidc_flow';
-const flowCookie=(token:string,env:AuthEnv)=>`${flowCookieName}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=300;${env.PUBLIC_ORIGIN.startsWith('https:')?' Secure;':''}`;
+const flowCookie=(token:string,env:AuthEnv)=>`${flowCookieName}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600;${env.PUBLIC_ORIGIN.startsWith('https:')?' Secure;':''}`;
 const json=(data:unknown,status=200,headers:HeadersInit={})=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store','referrer-policy':'no-referrer',...headers}});
 const error=(name:string,status=400)=>json({error:name},status);
 const redirect=(url:string,headers:HeadersInit={})=>new Response(null,{status:302,headers:{location:url,'cache-control':'no-store','referrer-policy':'no-referrer',...headers}});
@@ -58,7 +58,7 @@ export function cleanup(env:AuthEnv) {
  // At most once per minute per object, with persisted coordination across restarts.
  const row=env.DB.prepare("INSERT INTO rate_limits(key,count,reset_at) VALUES('cleanup',1,?) ON CONFLICT(key) DO UPDATE SET reset_at=excluded.reset_at WHERE rate_limits.reset_at<=? RETURNING key").bind(now()+60,now()).first();
  if(!row)return;
- for(const table of ['oidc_requests','oidc_codes','oidc_tokens','sessions','challenges'])env.DB.prepare(`DELETE FROM ${table} WHERE expires_at<=?`).bind(now()).run();
+ for(const table of ['oidc_requests','oidc_codes','oidc_tokens','sessions','challenges','email_logins'])env.DB.prepare(`DELETE FROM ${table} WHERE expires_at<=?`).bind(now()).run();
  env.DB.prepare('DELETE FROM invites WHERE expires_at<=? AND role<>? AND created_at<=?').bind(now(),'admin',now()-3600).run();
  env.DB.prepare('DELETE FROM oidc_keys WHERE active=0 AND retired_at<?').bind(now()-86400).run();
 }
@@ -122,7 +122,7 @@ export async function handleOIDC(req:Request,env:AuthEnv,getUser:()=>Promise<Use
   const request:Authorization={client_id:client.id,redirect_uri:client.redirect,scope:[...new Set(scopes)].join(' '),state,nonce,challenge,max_age:maxAge,require_reauth:reauth?1:0,previous_session_hash:await sha(cookie(req,settings(env).cookieName))};
   if(user&&!reauth)return redirect(await issueCode(env,user,request));
   if(prompt==='none')return failure('login_required');
-  const id=random(),browser=random();env.DB.prepare('INSERT INTO oidc_requests(id,browser_hash,client_id,redirect_uri,scope,state,nonce,challenge,previous_session_hash,require_reauth,max_age,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(id,await sha(browser),request.client_id,request.redirect_uri,request.scope,state,nonce,challenge,request.previous_session_hash,request.require_reauth,maxAge,now(),now()+300).run();
+  const id=random(),browser=random();env.DB.prepare('INSERT INTO oidc_requests(id,browser_hash,client_id,redirect_uri,scope,state,nonce,challenge,previous_session_hash,require_reauth,max_age,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(id,await sha(browser),request.client_id,request.redirect_uri,request.scope,state,nonce,challenge,request.previous_session_hash,request.require_reauth,maxAge,now(),now()+600).run();
   return redirect('/?oidc_request='+encodeURIComponent(id),{'set-cookie':flowCookie(browser,env)});
  }
  if(req.method==='POST'&&path==='/oidc/continue') {
@@ -136,7 +136,7 @@ export async function handleOIDC(req:Request,env:AuthEnv,getUser:()=>Promise<Use
   if(pending.require_reauth&&pending.previous_session_hash===await sha(cookie(req,settings(env).cookieName)))return error('login_required',401);
   if(pending.max_age!==null&&pending.max_age>0&&now()-user.auth_time>pending.max_age)return error('login_required',401);
   const consumed=env.DB.prepare('DELETE FROM oidc_requests WHERE id=? AND browser_hash=? AND expires_at>? RETURNING id').bind(data.get('request_id'),await sha(cookie(req,flowCookieName)),now()).first();if(!consumed)return error('invalid_request');
-  return json({redirect:await issueCode(env,user,pending)},200,{'set-cookie':flowCookie('',env).replace('Max-Age=300','Max-Age=0')});
+  return json({redirect:await issueCode(env,user,pending)},200,{'set-cookie':flowCookie('',env).replace('Max-Age=600','Max-Age=0')});
  }
  if(req.method==='POST'&&path==='/oidc/token') {
   const p=await readParams(req);if(!p||!unique(p))return error('invalid_request');

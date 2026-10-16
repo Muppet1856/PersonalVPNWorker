@@ -94,7 +94,7 @@ test('OIDC migration preserves the previous passkey schema and existing users',a
  const {schemaV1}=await import('../src/schema.ts');const sql=new DatabaseSync(':memory:');
  sql.exec(schemaV1);sql.exec("CREATE TABLE schema_version(version INTEGER PRIMARY KEY);INSERT INTO schema_version VALUES(1);INSERT INTO users(id,email,name,role,created_at) VALUES('existing','existing@example.com','Existing','admin',1)");
  sql.prepare('INSERT INTO passkeys(id,user_id,public_key,counter,device_type,created_at) VALUES(?,?,?,?,?,?)').run('key','existing',Buffer.from([1,2,3]),4,'singleDevice',1);
- new DB(sql);assert.equal(sql.prepare('SELECT counter FROM passkeys WHERE id=?').get('key').counter,4);assert.equal(sql.prepare('SELECT MAX(version) AS v FROM schema_version').get().v,3);
+ new DB(sql);assert.equal(sql.prepare('SELECT counter FROM passkeys WHERE id=?').get('key').counter,4);assert.equal(sql.prepare('SELECT MAX(version) AS v FROM schema_version').get().v,4);
  assert.ok(sql.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='oidc_keys'").get());
 });
 test('OIDC expired codes and disabled accounts cannot obtain identity tokens',async()=>{
@@ -135,7 +135,7 @@ test('portal consumes invitation fragments without an automatic enrollment reque
 test('email schema migration preserves existing v2 invitations and passkey accounts',async()=>{
  const {schemaV1,schemaV2}=await import('../src/schema.ts');const sql=new DatabaseSync(':memory:');sql.exec(schemaV1);sql.exec(schemaV2);sql.exec('CREATE TABLE schema_version(version INTEGER PRIMARY KEY);INSERT INTO schema_version VALUES(2)');
  sql.prepare('INSERT INTO invites(token_hash,email,role,expires_at,created_by) VALUES(?,?,?,?,?)').run('existing-hash','family@example.com','family',2000000000,'existing-admin');
- new DB(sql);const invite=sql.prepare('SELECT * FROM invites').get();assert.equal(invite.token_hash,'existing-hash');assert.equal(invite.expires_at,2000000000);assert.equal(invite.created_at,0);assert.equal(sql.prepare('SELECT MAX(version) AS v FROM schema_version').get().v,3);
+ new DB(sql);const invite=sql.prepare('SELECT * FROM invites').get();assert.equal(invite.token_hash,'existing-hash');assert.equal(invite.expires_at,2000000000);assert.equal(invite.created_at,0);assert.equal(sql.prepare('SELECT MAX(version) AS v FROM schema_version').get().v,4);
 });
 
 test('user management is administrator-only and rejects cross-origin mutations',async()=>{
@@ -245,4 +245,84 @@ test('portal logout navigates the same browser to Access only after successful l
   await logout();
   assert.deepEqual(events,mode==='access'?['local','Signing out of protected applications…','https://example.cloudflareaccess.com/cdn-cgi/access/logout']:mode==='local'?['local','Signed out','refresh']:['local','Error: Request failed']);
  }
+});
+
+async function emailFixture(run){
+ const f=fixture();const enrolled=await enroll(f);Object.assign(f.env,{PUBLIC_ORIGIN:'https://vpn.example.com',RESEND_API_KEY:'test-only-key',RESEND_FROM:'signin@mail.example.com'});
+ const call=(path,data,cookie,requestOrigin=f.env.PUBLIC_ORIGIN)=>f.call(path,data,cookie,requestOrigin);
+ const sent=[];const oldFetch=globalThis.fetch;globalThis.fetch=async(url,init)=>{assert.equal(url,'https://api.resend.com/emails');sent.push(JSON.parse(init.body));return new Response('',{status:200});};
+ const request=async(email='jeff@example.com')=>{const response=await call('/api/email/request',{email});assert.equal(response.status,200);const body=await response.json();const cookie=response.headers.get('set-cookie').split(';')[0];return {flow:body.flow,cookie,code:sent.at(-1)?.text.match(/\n\n(\d{8})\n/)[1],body,response};};
+ try{await run({f,call,sent,request,enrolled});}finally{globalThis.fetch=oldFetch;}
+}
+test('email codes create remembered sessions, survive object restart, and cannot be replayed or raced',async()=>emailFixture(async({f,call,sent,request})=>{
+ const x=await request('JEFF@example.com');assert.equal(sent.length,1);assert.equal(sent[0].to[0],'jeff@example.com');assert.match(x.code,/^\d{8}$/);assert.match(x.response.headers.get('set-cookie'),/HttpOnly; SameSite=Lax; Max-Age=600; Secure/);
+ const stored=JSON.stringify(f.env.DB.sql.prepare('SELECT * FROM email_logins').all());assert.ok(!stored.includes(x.code));assert.ok(!stored.includes(x.flow));
+ f.env.DB=new DB(f.env.DB.sql);
+ const input={flow:x.flow,code:x.code,remember_me:true};const replies=await Promise.all([call('/api/email/verify',input,x.cookie),call('/api/email/verify',input,x.cookie)]);assert.deepEqual(replies.map(r=>r.status).sort(),[200,403]);
+ const signed=replies.find(r=>r.status===200);assert.match(signed.headers.get('set-cookie'),/Max-Age=2592000/);const session=signed.headers.get('set-cookie').split(';')[0];
+ assert.equal((await (await call('/api/me',undefined,session)).json()).user.email,'jeff@example.com');assert.equal(f.env.DB.sql.prepare('SELECT COUNT(*) AS n FROM email_logins').get().n,0);
+ assert.equal((await call('/api/email/verify',input,x.cookie)).status,403);
+ await call('/api/logout',{},session);assert.equal((await (await call('/api/me',undefined,session)).json()).user,null);
+}));
+test('email codes require the requesting browser, same origin, valid preferences and at most five guesses',async()=>emailFixture(async({call,request})=>{
+ const x=await request();const input={flow:x.flow,code:x.code,remember_me:false};
+ assert.equal((await call('/api/email/verify',input)).status,403);
+ assert.equal((await call('/api/email/verify',input,'family_session_email=wrong')).status,403);
+ assert.equal((await call('/api/email/verify',input,x.cookie,'https://evil.example')).status,403);
+ assert.equal((await call('/api/email/verify',{...input,remember_me:'true'},x.cookie)).status,400);
+ const wrong=x.code==='00000000'?'11111111':'00000000';for(let n=0;n<4;n++)assert.equal((await call('/api/email/verify',{...input,code:wrong},x.cookie)).status,403);
+ const success=await call('/api/email/verify',input,x.cookie);assert.equal(success.status,200);assert.doesNotMatch(success.headers.get('set-cookie'),/Max-Age|Expires/);
+}));
+test('five wrong email guesses permanently burn the challenge; requesting a code has persistent limits',async()=>emailFixture(async({f,call,request,sent})=>{
+ const x=await request();const wrong=x.code==='00000000'?'11111111':'00000000';
+ const attempts=await Promise.all(Array.from({length:8},()=>call('/api/email/verify',{flow:x.flow,code:wrong},x.cookie)));assert.ok(attempts.every(r=>r.status===403));
+ assert.equal((await call('/api/email/verify',{flow:x.flow,code:x.code},x.cookie)).status,403);
+ assert.equal((await call('/api/email/request',{email:'jeff@example.com'})).status,429);assert.equal(sent.length,1);
+ f.env.DB=new DB(f.env.DB.sql);assert.equal((await call('/api/email/request',{email:'jeff@example.com'})).status,429);
+ for(let n=0;n<2;n++){f.env.DB.sql.exec("UPDATE rate_limits SET reset_at=0 WHERE key LIKE 'email-send-minute:%'");await request();}
+ f.env.DB.sql.exec("UPDATE rate_limits SET reset_at=0 WHERE key LIKE 'email-send-minute:%'");assert.equal((await call('/api/email/request',{email:'jeff@example.com'})).status,429);assert.equal(sent.length,3);
+}));
+test('email codes expire and a newer code replaces the old challenge',async()=>emailFixture(async({f,call,request})=>{
+ const old=await request();f.env.DB.sql.exec("UPDATE rate_limits SET reset_at=0 WHERE key LIKE 'email-send-minute:%'");const fresh=await request();
+ assert.equal((await call('/api/email/verify',{flow:old.flow,code:old.code},old.cookie)).status,403);
+ f.env.DB.sql.exec('UPDATE email_logins SET expires_at=1');assert.equal((await call('/api/email/verify',{flow:fresh.flow,code:fresh.code},fresh.cookie)).status,403);
+}));
+test('unknown, unenrolled and disabled addresses receive generic responses without mail or usable challenges',async()=>emailFixture(async({f,call,sent,request})=>{
+ const known=await request();const unknown=await request('unknown@example.com');assert.equal(unknown.body.message,known.body.message);assert.equal(unknown.flow.length,known.flow.length);assert.equal(sent.length,1);
+ assert.equal((await call('/api/email/verify',{flow:unknown.flow,code:known.code},unknown.cookie)).status,403);
+ f.env.DB.sql.exec('UPDATE users SET active=0');const disabled=await request('JEFF2@example.com');assert.equal(disabled.body.message,known.body.message);
+ assert.equal((await call('/api/email/verify',{flow:known.flow,code:known.code},known.cookie)).status,403);
+ f.env.DB.sql.exec("DELETE FROM rate_limits WHERE key LIKE 'email-send%'");await request();assert.equal(sent.length,1);
+ assert.equal((await call('/api/email/request',{email:'a\r\nb@example.com'})).status,400);
+ f.env.RESEND_API_KEY='';assert.equal((await call('/api/email/request',{email:'jeff@example.com'})).status,503);
+}));
+test('failed mail delivery never leaves a usable email code',async()=>emailFixture(async({f,call})=>{
+ let code;globalThis.fetch=async(url,init)=>{code=JSON.parse(init.body).text.match(/\n\n(\d{8})\n/)[1];return new Response('',{status:403});};
+ const response=await call('/api/email/request',{email:'jeff@example.com'});const {flow}=await response.json();assert.equal(response.status,200);assert.equal(f.env.DB.sql.prepare('SELECT COUNT(*) AS n FROM email_logins').get().n,0);
+ assert.equal((await call('/api/email/verify',{flow,code},response.headers.get('set-cookie').split(';')[0])).status,403);
+}));
+test('administrator revocation removes pending email codes before the user can sign in',async()=>emailFixture(async({f,call,request,enrolled})=>{
+ const x=await request();const id=f.env.DB.sql.prepare('SELECT id FROM users').get().id;
+ assert.equal((await call('/api/admin/users',{user_id:id,action:'revoke_sessions'},enrolled.cookie)).status,200);
+ assert.equal((await call('/api/email/verify',{flow:x.flow,code:x.code},x.cookie)).status,403);
+}));
+test('email authentication completes the existing browser-bound OIDC continuation',async()=>emailFixture(async({f,call,request})=>{
+ const {createHash}=await import('node:crypto');Object.assign(f.env,{ACCESS_TEAM_DOMAIN:'example.cloudflareaccess.com',OIDC_CLIENT_SECRET:'secret-at-least-32-characters-for-test'});
+ const callback='https://example.cloudflareaccess.com/cdn-cgi/access/callback';const params=new URLSearchParams({response_type:'code',client_id:'family-access',redirect_uri:callback,scope:'openid email',state:'email-test-state',nonce:'nonce',prompt:'login',code_challenge:createHash('sha256').update('a'.repeat(43)).digest('base64url'),code_challenge_method:'S256'});
+ const started=await call('/oidc/authorize?'+params);assert.equal(started.status,302);const requestID=new URL(started.headers.get('location'),origin).searchParams.get('oidc_request');const browser=started.headers.get('set-cookie').split(';')[0];
+ const x=await request();const signed=await call('/api/email/verify',{flow:x.flow,code:x.code},x.cookie);assert.equal(signed.status,200);
+ const continued=await worker.fetch(new Request(origin+'/oidc/continue',{method:'POST',headers:{origin:f.env.PUBLIC_ORIGIN,'content-type':'application/x-www-form-urlencoded',cookie:browser+'; '+signed.headers.get('set-cookie').split(';')[0]},body:new URLSearchParams({request_id:requestID})}),f.env);
+ assert.equal(continued.status,200);const redirect=new URL((await continued.json()).redirect);assert.equal(redirect.origin+redirect.pathname,callback);assert.equal(redirect.searchParams.get('state'),'email-test-state');assert.ok(redirect.searchParams.get('code'));
+}));
+
+test('portal logout invalidates the requesting browser email challenge',async()=>emailFixture(async({call,request})=>{
+ const x=await request();assert.equal((await call('/api/logout',{},x.cookie)).status,200);
+ assert.equal((await call('/api/email/verify',{flow:x.flow,code:x.code},x.cookie)).status,403);
+}));
+test('email code UI verifies inside the current window and continues OIDC after authentication',async()=>{
+ const f=fixture();const page=await (await f.call('/')).text();assert.match(page,/autocomplete="one-time-code"/);assert.match(page,/id="sendCode"/);
+ const source=page.match(/\$\('verifyCode'\)\.onclick=(async\(\)=>\{[^\n]*\});/)[1];const events=[];
+ const nodes={emailCode:{value:'01234567',reportValidity:()=>true},verifyCode:{disabled:false},rememberMe:{checked:true},codeEntry:{hidden:false}};
+ const handler=new Function('$','api','say','refresh','finishOIDC',`let emailFlow='flow';return (${source});`)(id=>nodes[id],async(path,data)=>{events.push('verify');assert.equal(path,'/api/email/verify');assert.deepEqual(data,{flow:'flow',code:'01234567',remember_me:true});},()=>{},async()=>events.push('refresh'),async()=>events.push('continue'));
+ await handler();assert.deepEqual(events,['verify','refresh','continue']);assert.equal(nodes.emailCode.value,'');assert.equal(nodes.codeEntry.hidden,true);assert.equal(nodes.verifyCode.disabled,false);
 });

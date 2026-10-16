@@ -30,3 +30,12 @@ export const schemaV3 = `
 ALTER TABLE invites ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX invites_recipient_created_idx ON invites(email,created_by,created_at);
 `;
+
+export const schemaV4 = `
+CREATE TABLE email_logins (
+ id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id),
+ browser_hash TEXT NOT NULL, code_hash TEXT NOT NULL,
+ attempts INTEGER NOT NULL DEFAULT 0, expires_at INTEGER NOT NULL
+);
+CREATE INDEX email_logins_user_idx ON email_logins(user_id);
+`;

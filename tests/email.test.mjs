@@ -25,3 +25,10 @@ test('deployment allows only valid sender settings and never copies the Resend k
  const config=deploymentConfig(env,JSON.parse(readFileSync('wrangler.jsonc','utf8')));assert.equal(config.vars.RESEND_FROM,env.RESEND_FROM);assert.equal(config.vars.RESEND_REPLY_TO,env.RESEND_REPLY_TO);assert.equal(JSON.stringify(config).includes(env.RESEND_API_KEY),false);
  assert.throws(()=>deploymentConfig({...env,RESEND_FROM:'bad\r\nBcc: victim@example.com'},{}));
 });
+
+test('sign-in emails contain a copyable code and no magic link or code in the subject',async()=>{
+ const {signInCodeEmail,sendSignInCode}=await import('../src/email.ts');const mail=signInCodeEmail(env,'member@example.com','01234567');
+ assert.match(mail.text,/01234567/);assert.match(mail.text,/same window/);assert.match(mail.html,/Family &lt;Access&gt;/);assert.ok(!mail.subject.includes('01234567'));assert.ok(!mail.html.includes('<a '));
+ const calls=[];assert.equal(await sendSignInCode(env,'member@example.com','01234567','test-hash',async(url,init)=>{calls.push(init);return new Response('',{status:calls.length===1?500:200});}),'accepted');
+ assert.equal(calls.length,2);assert.equal(calls[0].body,calls[1].body);assert.equal(calls[0].headers['idempotency-key'],'signin-test-hash');assert.equal(calls[1].headers['idempotency-key'],'signin-test-hash');
+});

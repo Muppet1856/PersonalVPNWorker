@@ -6,7 +6,7 @@ Despite the repository name, this project currently provides **authentication**,
 
 ## Current milestone
 
-Implemented: first-administrator bootstrap, one-time invitations, WebAuthn passkey registration and login, server-side sessions, logout, administrator invitation creation, a user management console and optional Resend invitation emails, a minimal portal/app launcher, OIDC Authorization Code + S256 PKCE federation, persistent RS256 signing keys, public discovery/JWKS, and optional Cloudflare Access API provisioning. SQLite storage initializes automatically: no D1 database, database ID, or separate migration command is needed.
+Implemented: first-administrator bootstrap, one-time invitations, WebAuthn passkey registration and login, Resend email-code sign-in, server-side sessions, logout, administrator invitation creation, a user management console and optional Resend invitation emails, a minimal portal/app launcher, OIDC Authorization Code + S256 PKCE federation, persistent RS256 signing keys, public discovery/JWKS, and optional Cloudflare Access API provisioning. SQLite storage initializes automatically: no D1 database, database ID, or separate migration command is needed.
 
 Not implemented yet: Sign in with Apple, account recovery, multiple-passkey administration, audit trails and complete production hardening. The OIDC implementation supports one preconfigured confidential Cloudflare Access client; it is not a general-purpose, conformance-certified identity platform. This milestone is for development and evaluation; finish those controls before using it as a production identity provider.
 
@@ -44,7 +44,17 @@ After creating your administrator passkey, follow [Cloudflare Access setup](docs
 
 **Log out** first invalidates the current portal session and clears its cookie, then navigates the browser to the configured `ACCESS_TEAM_DOMAIN`'s `/cdn-cgi/access/logout` endpoint. This also revokes that user's Cloudflare Access sessions across applications and ends on Cloudflare's logout page. Existing application tokens can take 20–30 seconds to stop being accepted. Already displayed content and each application's own login session are not erased; Access requires authentication again on subsequent protected requests. Without an Access team configured, logout stays on the portal. API clients must follow the returned `logout_url` with a top-level browser navigation; a background/server fetch does not send the browser's Access cookie.
 
-Remembering the portal does not override an application's OIDC `prompt=login` or `max_age` request. The portal keeps the passkey form visible for those re-authentication flows. Cloudflare Access sessions have their own lifetime (24 hours in this project's default policy). Private browsing and clearing site data remove browser cookies.
+Remembering the portal does not override an application's OIDC `prompt=login` or `max_age` request. The portal keeps the sign-in form visible for those re-authentication flows. Cloudflare Access sessions have their own lifetime (24 hours in this project's default policy). Private browsing and clearing site data remove browser cookies.
+
+## Email-code sign-in (embedded browsers and Conduit)
+
+With HTTPS and the existing `RESEND_API_KEY` / `RESEND_FROM` configured, the sign-in page also offers **Email me a sign-in code**. Enter your enrolled account's email address, copy the eight-digit code from the message, and enter it in the same browser window. There is no magic link and no need to open another browser. The existing Remember me option applies. An app-initiated sign-in continues to that application in the same window, allowing clients such as Conduit to capture their own Access session.
+
+Only existing active accounts receive codes. Pending invitations cannot sign in or create accounts by requesting a code; enrollment still uses the invitation and passkey flow. Codes expire after ten minutes, are single-use, bind to an HttpOnly browser cookie, and allow five guesses. A new code replaces the account's previous code. Codes and browser tokens are hashed in Durable Object SQLite; code verification and session issuance are atomic. Disabling an account or revoking its sessions clears pending email codes. App-login continuations allow ten minutes to complete authentication.
+
+Requests require the configured same-origin POST and return the same generic message for active, unknown or disabled email addresses. Sends are limited to one request per address per minute, three per address per hour, twenty per IP per hour and ninety per installation per day (including unknown addresses and failed sends). The last limit reserves some of Resend's free-tier allowance for invitations; invitation sends and other uses of the Resend account are counted separately. Delivery uses the existing bounded retry and idempotency handling; failed delivery leaves no usable code. No codes appear in URLs, logs, email subjects or API responses. Email-code sign-in trusts mailbox access and is less phishing-resistant than passkeys.
+
+No new GitHub secret or Cloudflare Access policy is required. These are authentication codes sent by your Worker through Resend, not Cloudflare's separate one-time-PIN identity provider. Without configured email sending, the email option remains hidden and its endpoints are unavailable.
 
 ## User management console
 
@@ -83,7 +93,7 @@ Set `LAUNCHER_ORIGIN=https://access.example.com` to serve a branded application 
 
 Tiles come from `ACCESS_APPS_JSON`. Chat and Git icons are detected from names/hostnames automatically. Set an optional `icon` on an entry to choose `chat`, `git`, `home`, `media`, `server`, `files`, `shield`, `key`, or `grid`, for example `{ "name": "Git", "domain": "git.example.com", "icon": "git" }`. The portal and launcher use Bootstrap 5.3.8 and Bootstrap Icons 1.13.2. CSS and selected SVGs are generated from pinned npm packages during `npm ci`, then served by the Worker. Run `npm run ui:build` after upgrading either package. Icons are local SVGs shared by the portal and launcher; no third-party favicon requests are made. The launcher has its own Access application and verifies Cloudflare's signed assertion before displaying links. With `CONFIGURE_ACCESS=true`, deployment provisions that application and binds its audience automatically using Wrangler. Until configuration completes, the launcher returns an unavailable response. See [launcher setup](docs/access-setup.md#custom-application-launcher).
 
-App tiles open a new tab/window when you visit the portal or launcher directly (the browser chooses which). App-initiated sign-in uses the browser-bound OIDC continuation and returns to the requesting app in the same tab after passkey login. This uses the authorization flow rather than the unreliable HTTP Referer header, and does not accept arbitrary return URLs.
+App tiles open a new tab/window when you visit the portal or launcher directly (the browser chooses which). App-initiated sign-in uses the browser-bound OIDC continuation and returns to the requesting app in the same tab after passkey or email-code login. This uses the authorization flow rather than the unreliable HTTP Referer header, and does not accept arbitrary return URLs.
 
 The Cloudflare team hostname remains part of authentication redirects; this launcher supplies your own landing page rather than masking those redirects.
 
@@ -215,6 +225,7 @@ The source is organized as follows:
 | `scripts/configure.mjs` | Validated deployment config generation |
 | `src/portal.ts`, `src/icons.ts`, `src/ui-assets.ts` | Bootstrap portal layout, local stylesheet delivery and selected Bootstrap Icons |
 | `src/admin.ts` | Administrator-only user status, session revocation and pending invitation controls |
+| `src/email-login.ts` | Browser-bound email-code requests, rate limits and atomic session issuance |
 | `src/email.ts` | Resend invitation templates, validation and bounded idempotent delivery |
 | `src/launcher.ts` | Custom launcher rendering and Access JWT verification |
 | `src/oidc.ts` | OIDC flow, signing keys, throttling and expired-record cleanup |
