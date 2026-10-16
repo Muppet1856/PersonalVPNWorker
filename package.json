@@ -11,10 +11,14 @@
     "build": "wrangler deploy --env=\"\" --dry-run --outdir dist",
     "configure": "node --env-file-if-exists=.env.deploy.local scripts/configure.mjs",
     "test:wrangler": "node --test tests/wrangler.integration.mjs",
-    "access:plan": "node --env-file-if-exists=.env.deploy.local scripts/configure-access.mjs"
+    "access:plan": "node --env-file-if-exists=.env.deploy.local scripts/configure-access.mjs",
+    "postinstall": "node scripts/generate-ui-assets.mjs",
+    "ui:build": "node scripts/generate-ui-assets.mjs"
   },
   "dependencies": {
     "@simplewebauthn/server": "^13.0.0",
+    "bootstrap": "5.3.8",
+    "bootstrap-icons": "1.13.2",
     "jose": "^6.2.12"
   },
   "devDependencies": {

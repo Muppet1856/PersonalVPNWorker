@@ -26,7 +26,7 @@ export function deploymentConfig(env, base) {
   if(access.launcher){config.routes.push({pattern:access.launcher.domain,custom_domain:true});config.vars.LAUNCHER_ORIGIN=env.LAUNCHER_ORIGIN;}
   config.vars.ACCESS_TEAM_DOMAIN=access.team;
   config.vars.OIDC_CLIENT_ID=access.clientID;
-  config.vars.APP_LINKS_JSON=JSON.stringify(access.apps.map(app=>({name:app.name,url:'https://'+app.domain})));
+  config.vars.APP_LINKS_JSON=JSON.stringify(access.apps.map(app=>({name:app.name,url:'https://'+app.domain,...(app.icon?{icon:app.icon}:{})})));
   for(const name of ['RESEND_FROM','RESEND_REPLY_TO'])if(env[name]){
     if(!/^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z]{2,63}$/.test(env[name]))throw Error(`${name} must be a bare email address`);
     config.vars[name]=env[name];

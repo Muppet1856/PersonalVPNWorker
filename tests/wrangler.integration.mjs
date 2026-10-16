@@ -35,7 +35,9 @@ test('wrangler dev: portal, passkeys, sessions, invitations and replay rejection
       await delay(500);
     }
     assert.ok(ready,`Wrangler did not become ready:\n${logs}`);
-    assert.match(await (await call('/')).text(),/<title>CI Access<\/title>/);
+    const portal=await (await call('/')).text();assert.match(portal,/<title>CI Access<\/title>/);
+    assert.ok(portal.includes('/assets/bootstrap-5.3.8.min.css'));
+    const stylesheet=await call('/assets/bootstrap-5.3.8.min.css');assert.equal(stylesheet.status,200);assert.match(stylesheet.headers.get('content-type'),/text\/css/);assert.match(stylesheet.headers.get('cache-control'),/immutable/);assert.match(await stylesheet.text(),/Bootstrap\s+v5\.3\.8/);
     assert.equal((await call('/api/setup',{},undefined,'https://untrusted.example')).status,403);
     const setup=await call('/api/setup',{email:'ci@example.com',secret:'ci-bootstrap-only'});assert.equal(setup.status,200);
     const {token}=await setup.json();const options=await (await call('/api/register/options',{token,name:'CI Admin'})).json();

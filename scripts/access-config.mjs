@@ -10,7 +10,8 @@ export function accessSettings(env) {
   if(domain.length>253||!domain.includes('.')||!domain.split('.').every(part=>/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(part)))throw Error('App domains must be exact hostnames without schemes, paths or wildcards');
   if(domain===origin.hostname||domain===team)throw Error('Never protect the identity provider or team domain with itself');
   if(seen.has(domain))throw Error('Duplicate Access application domain');seen.add(domain);
-  return {name:app.name.trim(),domain};
+  if(app.icon!==undefined&&!['chat','git','home','media','server','files','shield','key','grid'].includes(app.icon))throw Error('Unknown app icon');
+  return {name:app.name.trim(),domain,...(app.icon?{icon:app.icon}:{})};
  });
  let launcher;
  if(env.LAUNCHER_ORIGIN){

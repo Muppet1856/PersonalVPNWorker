@@ -73,7 +73,7 @@ Invitations are limited to one per address per minute and three per address per 
 
 Set `LAUNCHER_ORIGIN=https://access.example.com` to serve a branded application grid on a separate custom domain. Keep `PUBLIC_ORIGIN=https://vpn.example.com` and `RP_ID=vpn.example.com` for passkey authentication. The same Worker serves both hosts; existing passkeys keep their original scope.
 
-Tiles come from `ACCESS_APPS_JSON`. The launcher has its own Access application and verifies Cloudflare's signed assertion before displaying links. With `CONFIGURE_ACCESS=true`, deployment provisions that application and binds its audience automatically using Wrangler. Until configuration completes, the launcher returns an unavailable response. See [launcher setup](docs/access-setup.md#custom-application-launcher).
+Tiles come from `ACCESS_APPS_JSON`. Chat and Git icons are detected from names/hostnames automatically. Set an optional `icon` on an entry to choose `chat`, `git`, `home`, `media`, `server`, `files`, `shield`, `key`, or `grid`, for example `{ "name": "Git", "domain": "git.example.com", "icon": "git" }`. The portal and launcher use Bootstrap 5.3.8 and Bootstrap Icons 1.13.2. CSS and selected SVGs are generated from pinned npm packages during `npm ci`, then served by the Worker. Run `npm run ui:build` after upgrading either package. Icons are local SVGs shared by the portal and launcher; no third-party favicon requests are made. The launcher has its own Access application and verifies Cloudflare's signed assertion before displaying links. With `CONFIGURE_ACCESS=true`, deployment provisions that application and binds its audience automatically using Wrangler. Until configuration completes, the launcher returns an unavailable response. See [launcher setup](docs/access-setup.md#custom-application-launcher).
 
 The Cloudflare team hostname remains part of authentication redirects; this launcher supplies your own landing page rather than masking those redirects.
 
@@ -202,6 +202,7 @@ The source is organized as follows:
 | `src/config.ts` | Runtime setting defaults and lifetime bounds |
 | `src/store.ts`, `src/schema.ts` | Transactional SQLite access and schema initialization |
 | `scripts/configure.mjs` | Validated deployment config generation |
+| `src/portal.ts`, `src/icons.ts`, `src/ui-assets.ts` | Bootstrap portal layout, local stylesheet delivery and selected Bootstrap Icons |
 | `src/admin.ts` | Administrator-only user status, session revocation and pending invitation controls |
 | `src/email.ts` | Resend invitation templates, validation and bounded idempotent delivery |
 | `src/launcher.ts` | Custom launcher rendering and Access JWT verification |

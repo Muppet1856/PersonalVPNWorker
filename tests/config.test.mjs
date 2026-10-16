@@ -21,3 +21,8 @@ test('runtime settings apply custom lifetimes and reject invalid overrides',()=>
  assert.equal(config.sessionTTL,3600);assert.equal(config.inviteTTL,7200);assert.equal(config.cookieName,'example_session');assert.equal(config.siteName,'Example Access');
  assert.throws(()=>settings({SESSION_TTL_SECONDS:'NaN'}));assert.throws(()=>settings({SESSION_COOKIE_NAME:'bad;cookie'}));
 });
+test('app icon configuration is portable and rejects arbitrary markup',()=>{
+ const config=deploymentConfig({PUBLIC_ORIGIN:'https://vpn.example.com',ACCESS_APPS_JSON:JSON.stringify([{name:'Repository',domain:'git.example.com',icon:'git'}])},base);
+ assert.equal(JSON.parse(config.vars.APP_LINKS_JSON)[0].icon,'git');
+ assert.throws(()=>deploymentConfig({PUBLIC_ORIGIN:'https://vpn.example.com',ACCESS_APPS_JSON:JSON.stringify([{name:'App',domain:'app.example.com',icon:'<script>'}])},base),/Unknown app icon/);
+});

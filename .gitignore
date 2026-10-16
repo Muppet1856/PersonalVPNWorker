@@ -10,3 +10,6 @@ dist/
 coverage/
 !.env.deploy.example
 wrangler.deploy.json
+
+# Rebuilt from pinned npm UI dependencies during npm ci.
+src/generated/

@@ -1,3 +1,4 @@
+import { uiAsset } from './ui-assets.ts';
 import auth, { type AuthEnv } from './auth.ts';
 import { SqlStore } from './store.ts';
 import { handleLauncher } from './launcher.ts';
@@ -15,6 +16,7 @@ export class FamilyAuth {
 }
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const asset=uiAsset(request);if(asset)return asset;
     const origin=new URL(request.url).origin;
     if(env.LAUNCHER_ORIGIN && origin===env.LAUNCHER_ORIGIN)return handleLauncher(request,env);
     const id = env.FAMILY_AUTH.idFromName(env.FAMILY_ID || 'family-v1');
