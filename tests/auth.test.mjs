@@ -183,3 +183,39 @@ test('revoking a pending invitation blocks in-flight enrollment and does not tou
  assert.equal((await f.call('/api/admin/invites/revoke',{invitation_id:id},admin.cookie)).status,409);
  assert.equal(f.env.DB.sql.prepare('SELECT count(*) AS n FROM users').get().n,1);
 });
+
+test('remembered sign-in persists for 30 days across object restart and logout revokes it',async()=>{
+ const f=fixture();const {auth}=await enroll(f);const options=await (await f.call('/api/login/options',{email:'jeff@example.com'})).json();
+ const response=await f.call('/api/login/verify',{flow:options.flow,credential:auth.login(options.options.challenge),remember_me:true});assert.equal(response.status,200);
+ const header=response.headers.get('set-cookie');assert.match(header,/Max-Age=2592000/);assert.match(header,/Expires=/);assert.match(header,/HttpOnly; SameSite=Lax/);
+ const expires=new Date(header.match(/Expires=([^;]+)/)[1]).getTime();assert.ok(Math.abs(expires-Date.now()-2592000000)<3000);
+ const latest=f.env.DB.sql.prepare('SELECT MAX(expires_at-created_at) AS ttl FROM sessions').get();assert.equal(latest.ttl,2592000);
+ const cookie=header.split(';')[0];f.env.DB=new DB(f.env.DB.sql);assert.ok((await (await f.call('/api/me',undefined,cookie)).json()).user);
+ await f.call('/api/logout',{},cookie);assert.equal((await (await f.call('/api/me',undefined,cookie)).json()).user,null);
+});
+test('unremembered sign-in uses a browser-session cookie and invalid preferences do not consume a challenge',async()=>{
+ const f=fixture();const {auth}=await enroll(f);const options=await (await f.call('/api/login/options',{email:'jeff@example.com'})).json();const credential=auth.login(options.options.challenge);
+ assert.equal((await f.call('/api/login/verify',{flow:options.flow,credential,remember_me:'yes'})).status,400);
+ const response=await f.call('/api/login/verify',{flow:options.flow,credential,remember_me:false});assert.equal(response.status,200);
+ const header=response.headers.get('set-cookie');assert.ok(!header.includes('Max-Age='));assert.ok(!header.includes('Expires='));assert.match(header,/HttpOnly/);
+});
+test('enrollment honors the remembered-session lifetime configuration',async()=>{
+ const f=fixture();f.env.REMEMBER_ME_TTL_SECONDS='3600';const invite=await (await f.call('/api/setup',{email:'new@example.com',secret:f.env.ADMIN_SETUP_SECRET})).json();const options=await (await f.call('/api/register/options',{token:invite.token,name:'New user'})).json();
+ const response=await f.call('/api/register/verify',{token:invite.token,flow:options.flow,credential:authenticator().register(options.options.challenge),remember_me:true});assert.equal(response.status,200);assert.match(response.headers.get('set-cookie'),/Max-Age=3600/);
+});
+
+test('direct portal visits launch separate tabs while app sign-in keeps re-authentication visible',async()=>{
+ const f=fixture();const page=await (await f.call('/')).text();const refreshSource=page.match(/async function refresh\(\)\{[^\n]*\}/)[0];
+ for(const continuing of [false,true]){
+  const nodes=new Map();const node=()=>({hidden:false,dataset:{},children:[],classList:{toggle(){}},replaceChildren(){this.children=[]},append(...children){this.children.push(...children)},setAttribute(){}});
+  const get=id=>{if(!nodes.has(id))nodes.set(id,node());return nodes.get(id);};let dashboard;
+  const document={body:{classList:{toggle(name,value){dashboard=value;}}},createElement:()=>node()};
+  const fetcher=async()=>({json:async()=>({user:{name:'Member',email:'member@example.com',role:'family'},apps:[{name:'Chat',url:'https://chat.example.com',icon:'chat'}],oidc_ready:true,email_ready:false})});
+  const refresh=new Function('$','fetch','continuingLogin','document','refreshAdmin','appIcons',`let emailReady=false;return (${refreshSource});`)(get,fetcher,continuing,document,()=>{throw Error('Unexpected administrator request');},{grid:'<svg></svg>'});
+  await refresh();assert.equal(dashboard,!continuing);assert.equal(get('signin').hidden,!continuing);
+  const link=get('appLinks').children[0];assert.equal(link.target,continuing?'_self':'_blank');assert.equal(link.rel,'noopener noreferrer');
+ }
+ const finishSource=page.match(/async function finishOIDC\(\)\{[^\n]*\}/)[0];let returned;
+ const finish=new Function('location','fetch',`return (${finishSource});`)({search:'?oidc_request=flow',assign:url=>{returned=url;}},async(url,init)=>{assert.equal(url,'/oidc/continue');assert.equal(init.method,'POST');return {ok:true,json:async()=>({redirect:'https://example.cloudflareaccess.com/cdn-cgi/access/callback?code=code'})};});
+ await finish();assert.equal(returned,'https://example.cloudflareaccess.com/cdn-cgi/access/callback?code=code');
+});

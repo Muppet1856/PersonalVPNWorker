@@ -55,8 +55,8 @@ test('wrangler dev: portal, passkeys, sessions, invitations and replay rejection
     assert.equal((await call('/api/admin/invites/revoke',{invitation_id:pending.invitations[0].id},cookie)).status,200);
     assert.equal((await (await call('/api/admin/invites',undefined,cookie)).json()).invitations.length,0);
     const options2=await (await call('/api/login/options',{email:'ci@example.com'})).json();
-    const assertion={flow:options2.flow,credential:auth.login(options2.options.challenge)};
-    const login=await call('/api/login/verify',assertion);assert.equal(login.status,200);
+    const assertion={flow:options2.flow,credential:auth.login(options2.options.challenge),remember_me:true};
+    const login=await call('/api/login/verify',assertion);assert.equal(login.status,200);assert.match(login.headers.get('set-cookie'),/Max-Age=2592000/);assert.match(login.headers.get('set-cookie'),/Expires=/);
     assert.equal((await call('/api/login/verify',assertion)).status,403);
     // Complete the confidential-client OIDC exchange through the Wrangler HTTP server.
     const verifier='a'.repeat(43),callback='https://example.cloudflareaccess.com/cdn-cgi/access/callback';

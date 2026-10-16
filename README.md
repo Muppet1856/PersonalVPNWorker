@@ -38,6 +38,12 @@ Paste the returned token into **Accept family invitation**, enter your display n
 
 After creating your administrator passkey, follow [Cloudflare Access setup](docs/access-setup.md). The optional GitHub deployment step can configure the identity provider, self-hosted applications and member allow policies using Cloudflare's API. It defaults to **off**. The Worker’s discovery and public-key endpoints are checked after each deployment, even before an Access client is configured.
 
+## Remembered sign-in
+
+**Remember me on this device** is checked by default for passkey sign-in and enrollment. It creates a persistent HttpOnly, Secure (on HTTPS), SameSite=Lax cookie with matching Max-Age, Expires and server-side expiry, lasting `REMEMBER_ME_TTL_SECONDS` (30 days by default). Uncheck it for a browser-session cookie; the server still caps its lifetime using `SESSION_TTL_SECONDS`. API clients omitting `remember_me` keep the previous persistent `SESSION_TTL_SECONDS` behavior. Sign out, administrator session revocation, or disabling the account invalidates the session early.
+
+Remembering the portal does not override an application's OIDC `prompt=login` or `max_age` request. The portal keeps the passkey form visible for those re-authentication flows. Cloudflare Access sessions have their own lifetime (24 hours in this project's default policy). Private browsing and clearing site data remove browser cookies.
+
 ## User management console
 
 Open your configured `PUBLIC_ORIGIN` and sign in with the administrator passkey. The **User management** section shows user names, email addresses, roles, account status, passkey counts, active portal-session counts and the last passkey sign-in. Sign-in and enrollment forms are hidden while signed in.
@@ -75,6 +81,8 @@ Set `LAUNCHER_ORIGIN=https://access.example.com` to serve a branded application 
 
 Tiles come from `ACCESS_APPS_JSON`. Chat and Git icons are detected from names/hostnames automatically. Set an optional `icon` on an entry to choose `chat`, `git`, `home`, `media`, `server`, `files`, `shield`, `key`, or `grid`, for example `{ "name": "Git", "domain": "git.example.com", "icon": "git" }`. The portal and launcher use Bootstrap 5.3.8 and Bootstrap Icons 1.13.2. CSS and selected SVGs are generated from pinned npm packages during `npm ci`, then served by the Worker. Run `npm run ui:build` after upgrading either package. Icons are local SVGs shared by the portal and launcher; no third-party favicon requests are made. The launcher has its own Access application and verifies Cloudflare's signed assertion before displaying links. With `CONFIGURE_ACCESS=true`, deployment provisions that application and binds its audience automatically using Wrangler. Until configuration completes, the launcher returns an unavailable response. See [launcher setup](docs/access-setup.md#custom-application-launcher).
 
+App tiles open a new tab/window when you visit the portal or launcher directly (the browser chooses which). App-initiated sign-in uses the browser-bound OIDC continuation and returns to the requesting app in the same tab after passkey login. This uses the authorization flow rather than the unreliable HTTP Referer header, and does not accept arbitrary return URLs.
+
 The Cloudflare team hostname remains part of authentication redirects; this launcher supplies your own landing page rather than masking those redirects.
 
 ## Configuration
@@ -98,6 +106,7 @@ Edit `.env.deploy.local` for your installation. It is ignored by Git. Alternativ
 | `RP_ID` | WebAuthn relying-party hostname | Hostname from `PUBLIC_ORIGIN` |
 | `FAMILY_ID` | Stable name selecting the Durable Object's database | `family-v1` |
 | `SESSION_COOKIE_NAME` | Host-only session cookie name | `family_session` |
+| `REMEMBER_ME_TTL_SECONDS` | Remembered portal sessions; maximum 30 days | `2592000` (30 days) |
 | `SESSION_TTL_SECONDS` | Lifetime for newly issued sessions; maximum 30 days | `604800` (7 days) |
 | `INVITE_TTL_SECONDS` | Regular invitation lifetime; maximum 7 days | `86400` (24 hours) |
 | `SETUP_INVITE_TTL_SECONDS` | First-admin invitation lifetime; maximum 24 hours | `3600` (1 hour) |

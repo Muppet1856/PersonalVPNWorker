@@ -17,7 +17,7 @@ export function deploymentConfig(env, base) {
   config.vars={PUBLIC_ORIGIN:origin.origin,RP_ID:rpID,SITE_NAME:env.SITE_NAME?.trim() || 'Family Access',FAMILY_ID:env.FAMILY_ID || 'family-v1',SESSION_COOKIE_NAME:env.SESSION_COOKIE_NAME || 'family_session'};
   if(!/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(config.vars.SESSION_COOKIE_NAME))throw Error('Invalid SESSION_COOKIE_NAME');
   if(config.vars.FAMILY_ID.length>128)throw Error('FAMILY_ID must be at most 128 characters');
-  for(const [name,fallback,max] of [['SESSION_TTL_SECONDS',604800,2592000],['INVITE_TTL_SECONDS',86400,604800],['SETUP_INVITE_TTL_SECONDS',3600,86400],['CHALLENGE_TTL_SECONDS',300,600]]) {
+  for(const [name,fallback,max] of [['SESSION_TTL_SECONDS',604800,2592000],['REMEMBER_ME_TTL_SECONDS',2592000,2592000],['INVITE_TTL_SECONDS',86400,604800],['SETUP_INVITE_TTL_SECONDS',3600,86400],['CHALLENGE_TTL_SECONDS',300,600]]) {
     const value=Number(env[name] || fallback);
     if(!Number.isSafeInteger(value)||value<1||value>max)throw Error(`${name} must be an integer from 1 to ${max}`);
     config.vars[name]=String(value);
