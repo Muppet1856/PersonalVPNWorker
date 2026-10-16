@@ -86,7 +86,8 @@ $('login').onclick=async()=>{if(!$('email').reportValidity())return;const button
 $('createInvite').onclick=async()=>{if(!$('newEmail').reportValidity())return;const button=$('createInvite');button.disabled=true;try{const r=await api('/api/admin/invite',{email:$('newEmail').value.trim(),send_email:emailReady});say((r.delivery==='accepted'?'Invitation email accepted for delivery.':r.delivery==='failed'?'Email could not be confirmed. Share this private link instead; an email may still arrive.':'Invitation created. Share this private link:')+'\\n'+r.invitation_url);await refreshAdmin()}catch(e){say(String(e))}finally{button.disabled=false}};
 $('rotateKey').onclick=async()=>{try{const r=await api('/api/admin/oidc/rotate',{});say('Signing key rotated. Existing public keys remain available for 24 hours. New key: '+r.kid)}catch(e){say(String(e))}};
 const invitation=new URLSearchParams(location.hash.slice(1)).get('invite');if(invitation){$('enroll').open=true;$('invite').value=invitation;history.replaceState(null,'',location.pathname+location.search);$('displayName').focus();}
-$('logout').onclick=async()=>{try{await api('/api/logout',{});say('Signed out');await refresh()}catch(e){say(String(e))}};refresh().catch(e=>say(String(e)));
+async function logout(){try{const result=await api('/api/logout',{});if(result.logout_url){say('Signing out of protected applications…');location.assign(result.logout_url);return;}say('Signed out');await refresh()}catch(e){say(String(e))}}
+$('logout').onclick=logout;refresh().catch(e=>say(String(e)));
 </script></body></html>`;
 
 export default {async fetch(req:Request,env:AuthEnv):Promise<Response>{
@@ -169,7 +170,10 @@ export default {async fetch(req:Request,env:AuthEnv):Promise<Response>{
   return json({token,invitation_url:invitationLink(env.PUBLIC_ORIGIN,token),expires_in_seconds:ttl,delivery});
  }
  if(path==='/api/logout'){
-  const token=cookie(req,settings(env).cookieName);if(token)await env.DB.prepare('DELETE FROM sessions WHERE token_hash=?').bind(await digest(token)).run();return json({ok:true},200,{'set-cookie':`${settings(env).cookieName}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0;${secure(env)}`});
+  // A top-level browser navigation sends the team cookie; a server fetch cannot log Access out.
+  const team=env.ACCESS_TEAM_DOMAIN;
+  const logoutURL=team&&/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.cloudflareaccess\.com$/.test(team)?`https://${team}/cdn-cgi/access/logout`:null;
+  const token=cookie(req,settings(env).cookieName);if(token)await env.DB.prepare('DELETE FROM sessions WHERE token_hash=?').bind(await digest(token)).run();return json({ok:true,logout_url:logoutURL},200,{'set-cookie':`${settings(env).cookieName}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0;${secure(env)}`});
  }
  return failure('Not found',404);
  }catch(e){if(e instanceof InputError)return failure(e.message,e.status);console.error('Request failed');return failure('Request could not be completed',500);}

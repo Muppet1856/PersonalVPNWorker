@@ -42,6 +42,8 @@ After creating your administrator passkey, follow [Cloudflare Access setup](docs
 
 **Remember me on this device** is checked by default for passkey sign-in and enrollment. It creates a persistent HttpOnly, Secure (on HTTPS), SameSite=Lax cookie with matching Max-Age, Expires and server-side expiry, lasting `REMEMBER_ME_TTL_SECONDS` (30 days by default). Uncheck it for a browser-session cookie; the server still caps its lifetime using `SESSION_TTL_SECONDS`. API clients omitting `remember_me` keep the previous persistent `SESSION_TTL_SECONDS` behavior. Sign out, administrator session revocation, or disabling the account invalidates the session early.
 
+**Log out** first invalidates the current portal session and clears its cookie, then navigates the browser to the configured `ACCESS_TEAM_DOMAIN`'s `/cdn-cgi/access/logout` endpoint. This also revokes that user's Cloudflare Access sessions across applications and ends on Cloudflare's logout page. Existing application tokens can take 20–30 seconds to stop being accepted. Already displayed content and each application's own login session are not erased; Access requires authentication again on subsequent protected requests. Without an Access team configured, logout stays on the portal. API clients must follow the returned `logout_url` with a top-level browser navigation; a background/server fetch does not send the browser's Access cookie.
+
 Remembering the portal does not override an application's OIDC `prompt=login` or `max_age` request. The portal keeps the passkey form visible for those re-authentication flows. Cloudflare Access sessions have their own lifetime (24 hours in this project's default policy). Private browsing and clearing site data remove browser cookies.
 
 ## User management console

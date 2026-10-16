@@ -219,3 +219,30 @@ test('direct portal visits launch separate tabs while app sign-in keeps re-authe
  const finish=new Function('location','fetch',`return (${finishSource});`)({search:'?oidc_request=flow',assign:url=>{returned=url;}},async(url,init)=>{assert.equal(url,'/oidc/continue');assert.equal(init.method,'POST');return {ok:true,json:async()=>({redirect:'https://example.cloudflareaccess.com/cdn-cgi/access/callback?code=code'})};});
  await finish();assert.equal(returned,'https://example.cloudflareaccess.com/cdn-cgi/access/callback?code=code');
 });
+
+test('logout revokes the portal session and supplies only the configured Access team logout destination',async()=>{
+ const f=fixture();const {cookie}=await enroll(f);f.env.ACCESS_TEAM_DOMAIN='example.cloudflareaccess.com';
+ const rejected=await f.call('/api/logout',{},cookie,'https://untrusted.example');assert.equal(rejected.status,403);
+ assert.ok((await (await f.call('/api/me',undefined,cookie)).json()).user);
+ const response=await f.call('/api/logout',{logout_url:'https://untrusted.example'},cookie);
+ assert.equal(response.status,200);assert.equal((await response.json()).logout_url,'https://example.cloudflareaccess.com/cdn-cgi/access/logout');
+ assert.match(response.headers.get('set-cookie'),/family_session=;.*Max-Age=0/);
+ assert.equal((await (await f.call('/api/me',undefined,cookie)).json()).user,null);
+ // Repeat logout can finish Access sign-out even after the portal cookie is gone.
+ assert.equal((await (await f.call('/api/logout',{})).json()).logout_url,'https://example.cloudflareaccess.com/cdn-cgi/access/logout');
+ for(const team of [undefined,'example.cloudflareaccess.com.evil.test','example.cloudflareaccess.com/path','https://example.cloudflareaccess.com']){
+  f.env.ACCESS_TEAM_DOMAIN=team;assert.equal((await (await f.call('/api/logout',{})).json()).logout_url,null);
+ }
+});
+
+test('portal logout navigates the same browser to Access only after successful local logout',async()=>{
+ const f=fixture();const page=await (await f.call('/')).text();const source=page.match(/async function logout\(\)\{[^\n]*\}/)[0];
+ for(const mode of ['access','local','failure']){
+  const events=[];const logout=new Function('api','location','say','refresh',`return (${source});`)(async(path,data)=>{
+   events.push('local');assert.equal(path,'/api/logout');assert.deepEqual(data,{});if(mode==='failure')throw Error('Request failed');
+   return {logout_url:mode==='access'?'https://example.cloudflareaccess.com/cdn-cgi/access/logout':null};
+  },{assign:url=>events.push(url)},message=>events.push(message),async()=>events.push('refresh'));
+  await logout();
+  assert.deepEqual(events,mode==='access'?['local','Signing out of protected applications…','https://example.cloudflareaccess.com/cdn-cgi/access/logout']:mode==='local'?['local','Signed out','refresh']:['local','Error: Request failed']);
+ }
+});
