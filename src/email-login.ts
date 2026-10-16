@@ -11,11 +11,11 @@ function numericCode(){let value:number;do{value=crypto.getRandomValues(new Uint
 // Persist rate reservations before any provider I/O. Expired windows reset even across object restarts.
 function allow(env:AuthEnv,key:string,limit:number,seconds:number){const row=env.DB.prepare(`INSERT INTO rate_limits(key,count,reset_at) VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET count=CASE WHEN reset_at<=? THEN 1 ELSE count+1 END,reset_at=CASE WHEN reset_at<=? THEN excluded.reset_at ELSE reset_at END RETURNING count`).bind(key,now()+seconds,now(),now()).first<{count:number}>();return !!row&&row.count<=limit;}
 export async function requestEmailCode(req:Request,env:AuthEnv,data:Record<string,unknown>):Promise<Response>{
- if(!emailConfigured(env))return json({error:'Email sign-in is not configured'},503);
+ if(!emailConfigured(env)){console.warn(JSON.stringify({event:'email_login_request',outcome:'not_configured'}));return json({error:'Email sign-in is not configured'},503);}
  const email=typeof data.email==='string'?data.email.trim().toLowerCase():'';
  if(email.length>254||! /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))return json({error:'Enter a valid email address'},400);
  const emailHash=await hash(email),ipHash=await hash(req.headers.get('cf-connecting-ip')||'local');
- if(!allow(env,'email-send-minute:'+emailHash,1,60)||!allow(env,'email-send-hour:'+emailHash,3,3600)||!allow(env,'email-send-ip:'+ipHash,20,3600)||!allow(env,'email-send-day',90,86400))return json({error:'Please wait before requesting another code'},429,{'retry-after':'60'});
+ if(!allow(env,'email-send-minute:'+emailHash,1,60)||!allow(env,'email-send-hour:'+emailHash,3,3600)||!allow(env,'email-send-ip:'+ipHash,20,3600)||!allow(env,'email-send-day',90,86400)){console.info(JSON.stringify({event:'email_login_request',outcome:'rate_limited'}));return json({error:'Please wait before requesting another code'},429,{'retry-after':'60'});}
  const flow=random(),browser=random(),code=numericCode();
  const [id,browserHash,codeHash]=await Promise.all([hash(flow),hash(browser),hash(flow+':'+code)]);
  // Only an already enrolled active user can receive a usable code. Unknown addresses get the same public response.
@@ -26,8 +26,9 @@ export async function requestEmailCode(req:Request,env:AuthEnv,data:Record<strin
    env.DB.prepare('INSERT INTO email_logins(id,user_id,browser_hash,code_hash,attempts,expires_at) SELECT ?,id,?,?,0,? FROM users WHERE id=? AND active=1').bind(id,browserHash,codeHash,now()+600,user.id)
   ]);
   const sent=await sendSignInCode(env,email,code,id);
+  console.info(JSON.stringify({event:'email_login_request',outcome:sent==='accepted'?'send_accepted':'send_failed'}));
   if(sent!=='accepted')env.DB.prepare('DELETE FROM email_logins WHERE id=?').bind(id).run();
- }
+ }else console.info(JSON.stringify({event:'email_login_request',outcome:'account_unavailable'}));
  return json({ok:true,flow,message:'If this address has an active account, a code will arrive shortly. Enter it here within 10 minutes.'},200,{'set-cookie':`${bindingName(env)}=${browser}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600; Secure;`});
 }
 export async function verifyEmailCode(req:Request,env:AuthEnv,data:Record<string,unknown>,ttl:number):Promise<string|null>{

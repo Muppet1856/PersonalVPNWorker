@@ -25,8 +25,9 @@ async function sendTransactional(env:EmailEnv,mail:ReturnType<typeof invitationE
   let retry=true;
   try{const response=await fetcher('https://api.resend.com/emails',{method:'POST',redirect:'error',headers:{authorization:'Bearer '+env.RESEND_API_KEY,'content-type':'application/json','idempotency-key':idempotencyKey},body,signal:AbortSignal.timeout(10000)});
    const accepted=response.ok;retry=response.status===429||response.status>=500;
+   if(!accepted)console.warn(JSON.stringify({event:'email_provider_failure',purpose:idempotencyKey.startsWith('signin-')?'signin':'invitation',status:response.status,attempt:attempt+1}));
    await response.body?.cancel();if(accepted)return 'accepted';
-  }catch{/* Do not log provider responses, credentials, recipients or invitation links. */}
+  }catch{console.warn(JSON.stringify({event:'email_provider_failure',purpose:idempotencyKey.startsWith('signin-')?'signin':'invitation',status:'network_error',attempt:attempt+1}));/* Never log provider bodies, credentials, recipients or codes. */}
   if(!retry||attempt===1)return 'failed';
   await new Promise(resolve=>setTimeout(resolve,1000));
  }
