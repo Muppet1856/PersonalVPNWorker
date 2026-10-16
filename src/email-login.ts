@@ -14,8 +14,9 @@ export async function requestEmailCode(req:Request,env:AuthEnv,data:Record<strin
  if(!emailConfigured(env)){console.warn(JSON.stringify({event:'email_login_request',outcome:'not_configured'}));return json({error:'Email sign-in is not configured'},503);}
  const email=typeof data.email==='string'?data.email.trim().toLowerCase():'';
  if(email.length>254||! /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))return json({error:'Enter a valid email address'},400);
+ // Version the hourly bucket once so attempts lost to the unsupported redirect mode do not lock users out after the fix.
  const emailHash=await hash(email),ipHash=await hash(req.headers.get('cf-connecting-ip')||'local');
- if(!allow(env,'email-send-minute:'+emailHash,1,60)||!allow(env,'email-send-hour:'+emailHash,3,3600)||!allow(env,'email-send-ip:'+ipHash,20,3600)||!allow(env,'email-send-day',90,86400)){console.info(JSON.stringify({event:'email_login_request',outcome:'rate_limited'}));return json({error:'Please wait before requesting another code'},429,{'retry-after':'60'});}
+ if(!allow(env,'email-send-minute:'+emailHash,1,60)||!allow(env,'email-send-hour-v2:'+emailHash,3,3600)||!allow(env,'email-send-ip:'+ipHash,20,3600)||!allow(env,'email-send-day',90,86400)){console.info(JSON.stringify({event:'email_login_request',outcome:'rate_limited'}));return json({error:'Please wait before requesting another code'},429,{'retry-after':'60'});}
  const flow=random(),browser=random(),code=numericCode();
  const [id,browserHash,codeHash]=await Promise.all([hash(flow),hash(browser),hash(flow+':'+code)]);
  // Only an already enrolled active user can receive a usable code. Unknown addresses get the same public response.

@@ -12,7 +12,7 @@ test('email template escapes content and uses a private fragment enrollment link
 });
 test('email retries transient failures using an identical payload and idempotency key',async()=>{
  const calls=[];const result=await sendInvitation(env,'member@example.com','private-token',2000000000,'hash-only',async(url,init)=>{calls.push({url,init});return new Response('',{status:calls.length===1?503:200});});
- assert.equal(result,'accepted');assert.equal(calls.length,2);assert.equal(calls[0].init.body,calls[1].init.body);assert.equal(calls[0].init.headers['idempotency-key'],calls[1].init.headers['idempotency-key']);assert.equal(calls[0].init.headers['idempotency-key'].includes('private-token'),false);assert.equal(calls[0].init.redirect,'error');
+ assert.equal(result,'accepted');assert.equal(calls.length,2);assert.equal(calls[0].init.body,calls[1].init.body);assert.equal(calls[0].init.headers['idempotency-key'],calls[1].init.headers['idempotency-key']);assert.equal(calls[0].init.headers['idempotency-key'].includes('private-token'),false);assert.equal(calls[0].init.redirect,'manual');
 });
 test('email permanent failures do not retry, and missing configuration sends nothing',async()=>{
  let calls=0;const fetcher=async()=>{calls++;return new Response('',{status:403});};
@@ -31,4 +31,9 @@ test('sign-in emails contain a copyable code and no magic link or code in the su
  assert.match(mail.text,/01234567/);assert.match(mail.text,/same window/);assert.match(mail.html,/Family &lt;Access&gt;/);assert.ok(!mail.subject.includes('01234567'));assert.ok(!mail.html.includes('<a '));
  const calls=[];assert.equal(await sendSignInCode(env,'member@example.com','01234567','test-hash',async(url,init)=>{calls.push(init);return new Response('',{status:calls.length===1?500:200});}),'accepted');
  assert.equal(calls.length,2);assert.equal(calls[0].body,calls[1].body);assert.equal(calls[0].headers['idempotency-key'],'signin-test-hash');assert.equal(calls[1].headers['idempotency-key'],'signin-test-hash');
+});
+
+test('email sender refuses redirects without following or retrying them',async()=>{
+ const {sendSignInCode}=await import('../src/email.ts');let calls=0;
+ assert.equal(await sendSignInCode(env,'member@example.com','12345678','test-hash',async(url,init)=>{calls++;assert.equal(init.redirect,'manual');return new Response('',{status:302,headers:{location:'https://untrusted.example'}});}),'failed');assert.equal(calls,1);
 });

@@ -14,6 +14,7 @@ export function invitationEmail(env:EmailEnv,email:string,token:string,expires:n
  text:`You have been invited to ${brand}.\n\nOpen this private link, enter your display name, and create a passkey:\n${link}\n\nThis single-use invitation expires ${expiry}. Do not forward it. If you were not expecting this invitation, you can ignore this email.`,
  html:`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Your invitation</title></head><body style="margin:0;background:#f3f6f8;font-family:Arial,sans-serif;color:#162535"><div style="max-width:560px;margin:32px auto;padding:32px;background:#fff;border-radius:16px"><p style="font-size:16px">${escape(brand)}</p><h1 style="font-size:26px">You’re invited.</h1><p style="font-size:16px;line-height:1.6">Open your invitation, enter your display name, and create a passkey to access your account.</p><p style="margin:28px 0"><a href="${escape(link)}" style="display:inline-block;padding:16px 24px;border-radius:8px;background:#176d5d;color:#fff;text-decoration:none;font-size:16px">Accept invitation</a></p><p style="font-size:16px;line-height:1.6">This single-use invitation expires ${expiry}. Keep it private.</p><p style="font-size:14px;color:#536373">If the button does not work, copy this link:</p><p style="font-size:14px;overflow-wrap:anywhere"><a href="${escape(link)}">${escape(link)}</a></p><p style="font-size:14px;color:#536373">If you were not expecting this invitation, you can ignore this email.</p></div></body></html>`};
 }
+// Use manual redirects: workerd rejects redirect:error before sending. A 3xx is a permanent failure.
 // A bounded retry uses the same key and payload, so ambiguous network errors do not duplicate mail.
 export async function sendInvitation(env:EmailEnv,email:string,token:string,expires:number,idempotencyKey:string,fetcher:typeof fetch=fetch):Promise<'accepted'|'failed'>{
  if(!emailConfigured(env)||!mailbox.test(email))return 'failed';
@@ -23,7 +24,7 @@ async function sendTransactional(env:EmailEnv,mail:ReturnType<typeof invitationE
  const body=JSON.stringify(mail);
  for(let attempt=0;attempt<2;attempt++){
   let retry=true;
-  try{const response=await fetcher('https://api.resend.com/emails',{method:'POST',redirect:'error',headers:{authorization:'Bearer '+env.RESEND_API_KEY,'content-type':'application/json','idempotency-key':idempotencyKey},body,signal:AbortSignal.timeout(10000)});
+  try{const response=await fetcher('https://api.resend.com/emails',{method:'POST',redirect:'manual',headers:{authorization:'Bearer '+env.RESEND_API_KEY,'content-type':'application/json','idempotency-key':idempotencyKey},body,signal:AbortSignal.timeout(10000)});
    const accepted=response.ok;retry=response.status===429||response.status>=500;
    if(!accepted)console.warn(JSON.stringify({event:'email_provider_failure',purpose:idempotencyKey.startsWith('signin-')?'signin':'invitation',status:response.status,attempt:attempt+1}));
    await response.body?.cancel();if(accepted)return 'accepted';
