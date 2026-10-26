@@ -26,9 +26,9 @@ async function sendTransactional(env:EmailEnv,mail:ReturnType<typeof invitationE
   let retry=true;
   try{const response=await fetcher('https://api.resend.com/emails',{method:'POST',redirect:'manual',headers:{authorization:'Bearer '+env.RESEND_API_KEY,'content-type':'application/json','idempotency-key':idempotencyKey},body,signal:AbortSignal.timeout(10000)});
    const accepted=response.ok;retry=response.status===429||response.status>=500;
-   if(!accepted)console.warn(JSON.stringify({event:'email_provider_failure',purpose:idempotencyKey.startsWith('signin-')?'signin':'invitation',status:response.status,attempt:attempt+1}));
+   if(!accepted)console.warn(JSON.stringify({event:'email_provider_failure',purpose:idempotencyKey.startsWith('signin-')?'signin':idempotencyKey.startsWith('security-')?'security':'invitation',status:response.status,attempt:attempt+1}));
    await response.body?.cancel();if(accepted)return 'accepted';
-  }catch{console.warn(JSON.stringify({event:'email_provider_failure',purpose:idempotencyKey.startsWith('signin-')?'signin':'invitation',status:'network_error',attempt:attempt+1}));/* Never log provider bodies, credentials, recipients or codes. */}
+  }catch{console.warn(JSON.stringify({event:'email_provider_failure',purpose:idempotencyKey.startsWith('signin-')?'signin':idempotencyKey.startsWith('security-')?'security':'invitation',status:'network_error',attempt:attempt+1}));/* Never log provider bodies, credentials, recipients or codes. */}
   if(!retry||attempt===1)return 'failed';
   await new Promise(resolve=>setTimeout(resolve,1000));
  }
@@ -45,4 +45,12 @@ export function signInCodeEmail(env:EmailEnv,email:string,code:string){
 export async function sendSignInCode(env:EmailEnv,email:string,code:string,idempotencyKey:string,fetcher:typeof fetch=fetch):Promise<'accepted'|'failed'>{
  if(!emailConfigured(env)||!mailbox.test(email)||!/^\d{8}$/.test(code))return 'failed';
  return sendTransactional(env,signInCodeEmail(env,email,code),'signin-'+idempotencyKey,fetcher);
+}
+
+// Security alerts contain no tokens, credential IDs, or user-supplied names.
+export async function sendSecurityNotification(env:EmailEnv,email:string,action:string,idempotencyKey:string,fetcher:typeof fetch=fetch):Promise<'accepted'|'failed'>{
+ if(!emailConfigured(env)||!mailbox.test(email))return 'failed';
+ const brand=(env.SITE_NAME?.trim()||'Family Access').replace(/[\r\n]/g,' ').slice(0,100);
+ const message=`${action} on your ${brand} account (${new URL(env.PUBLIC_ORIGIN).hostname}). If this was not you, contact your administrator immediately. Review your passkeys and sign out other sessions. Cloudflare Access sessions must be revoked separately.`;
+ return sendTransactional(env,{from:`${brand.replace(/[<>"\\]/g,'')} <${env.RESEND_FROM}>`,to:[email],subject:`Security alert: ${action}`,text:message,html:`<!doctype html><html lang="en"><body><p>${escape(message)}</p></body></html>`,...(env.RESEND_REPLY_TO?{reply_to:env.RESEND_REPLY_TO}:{})},'security-'+idempotencyKey,fetcher);
 }

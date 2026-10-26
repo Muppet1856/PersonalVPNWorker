@@ -39,3 +39,25 @@ CREATE TABLE email_logins (
 );
 CREATE INDEX email_logins_user_idx ON email_logins(user_id);
 `;
+
+// Legacy sessions remain valid for sign-in, but cannot authorize security changes.
+export const schemaV5 = `
+CREATE TABLE user_app_permissions (user_id TEXT NOT NULL REFERENCES users(id),app_id TEXT NOT NULL,PRIMARY KEY(user_id,app_id));
+ALTER TABLE users ADD COLUMN access_revision INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN email_recovery_enabled INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE passkeys ADD COLUMN name TEXT NOT NULL DEFAULT 'Passkey';
+ALTER TABLE sessions ADD COLUMN auth_method TEXT NOT NULL DEFAULT 'unknown';
+ALTER TABLE sessions ADD COLUMN authenticated_at INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sessions ADD COLUMN credential_id TEXT;
+CREATE TABLE account_challenges (
+ id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id),
+ session_hash TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('reauth','add')),
+ challenge TEXT NOT NULL, name TEXT, expires_at INTEGER NOT NULL
+);
+CREATE INDEX account_challenges_session_idx ON account_challenges(session_hash);
+CREATE TABLE security_events (
+ id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id),
+ event TEXT NOT NULL, created_at INTEGER NOT NULL,
+ notification TEXT NOT NULL DEFAULT 'pending'
+);
+`;

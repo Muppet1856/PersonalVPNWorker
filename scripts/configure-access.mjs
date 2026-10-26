@@ -7,7 +7,7 @@ export async function configureAccess(env,{apply=false,fetcher=fetch,log=console
  const origin=new URL(env.PUBLIC_ORIGIN);if(origin.protocol!=='https:'||origin.origin!==env.PUBLIC_ORIGIN)throw Error('PUBLIC_ORIGIN must be a canonical HTTPS origin');
  const {team,clientID,apps,launcher}=accessSettings(env);const targetsApps=launcher?[...apps,launcher]:apps;if(!team)throw Error('Set ACCESS_TEAM_DOMAIN to your existing Zero Trust team hostname');
  const managedName=`${clientID} (PersonalVPNWorker)`;
- const plan={identity_provider:{name:managedName,type:'oidc',client_id:clientID,auth_url:origin.origin+'/oidc/authorize',token_url:origin.origin+'/oidc/token',certs_url:origin.origin+'/oidc/jwks',pkce_enabled:true},callback:`https://${team}/cdn-cgi/access/callback`,applications:targetsApps.map(app=>({name:`${clientID}: ${app.name}`,domain:app.domain,policy:'Allow active invited members via this OIDC provider'}))};
+ const plan={identity_provider:{name:managedName,type:'oidc',client_id:clientID,auth_url:origin.origin+'/oidc/authorize',token_url:origin.origin+'/oidc/token',certs_url:origin.origin+'/oidc/jwks',pkce_enabled:true,claims:['allowed_apps']},callback:`https://${team}/cdn-cgi/access/callback`,applications:targetsApps.map(app=>({name:`${clientID}: ${app.name}`,domain:app.domain,policy:launcher&&app.domain===launcher.domain?'Allow active invited members to the launcher':`Require allowed_apps claim to contain ${app.domain}`}))};
  if(!apply){log(JSON.stringify(plan,null,2));return plan;}
  if(!env.CLOUDFLARE_ACCESS_API_TOKEN||!env.CLOUDFLARE_ACCOUNT_ID)throw Error('Set CLOUDFLARE_ACCESS_API_TOKEN and CLOUDFLARE_ACCOUNT_ID');
  if(!env.OIDC_CLIENT_SECRET||env.OIDC_CLIENT_SECRET.length<32)throw Error('Set OIDC_CLIENT_SECRET to at least 32 random characters');
@@ -40,7 +40,7 @@ export async function configureAccess(env,{apply=false,fetcher=fetch,log=console
   if(policies.some(x=>x.name!==`${clientID}: Members`)||policies.length>1)throw Error(`Unmanaged policies exist for ${app.domain}; review them before automated configuration`);
   targets.push({app,name,existing,policy:policies[0]});
  }
- const idpBody={name:managedName,type:'oidc',config:{client_id:clientID,client_secret:env.OIDC_CLIENT_SECRET,auth_url:plan.identity_provider.auth_url,token_url:plan.identity_provider.token_url,certs_url:plan.identity_provider.certs_url,pkce_enabled:true,email_claim_name:'email',scopes:['openid','email','profile']}};
+ const idpBody={name:managedName,type:'oidc',config:{client_id:clientID,client_secret:env.OIDC_CLIENT_SECRET,auth_url:plan.identity_provider.auth_url,token_url:plan.identity_provider.token_url,certs_url:plan.identity_provider.certs_url,pkce_enabled:true,claims:['allowed_apps'],email_claim_name:'email',scopes:['openid','email','profile']}};
  const idp=(await api(existingIDP?`/identity_providers/${existingIDP.id}`:'/identity_providers',existingIDP?'PUT':'POST',idpBody)).result;
  if(!idp?.id)throw Error('Cloudflare did not return an identity provider ID');
  log('Configured managed OIDC identity provider.');
@@ -48,7 +48,7 @@ export async function configureAccess(env,{apply=false,fetcher=fetch,log=console
   const body={name,type:'self_hosted',domain:app.domain,session_duration:'24h',allowed_idps:[idp.id],auto_redirect_to_identity:true,app_launcher_visible:true};
   const saved=(await api(existing?`/apps/${existing.id}`:'/apps',existing?'PUT':'POST',body)).result;
   if(!saved?.id)throw Error('Cloudflare did not return an application ID');
-  await api(`/apps/${saved.id}/policies${policy?'/'+policy.id:''}`,policy?'PUT':'POST',{name:`${clientID}: Members`,decision:'allow',precedence:1,include:[{login_method:{id:idp.id}}],exclude:[],require:[]});
+  await api(`/apps/${saved.id}/policies${policy?'/'+policy.id:''}`,policy?'PUT':'POST',{name:`${clientID}: Members`,decision:'allow',precedence:1,include:[{login_method:{id:idp.id}}],exclude:[],require:launcher&&app.domain===launcher.domain?[]:[{oidc:{claim_name:'allowed_apps',claim_value:app.domain,identity_provider_id:idp.id}}]});
   if(launcher&&app.domain===launcher.domain){
    if(typeof saved.aud!=='string'||! /^[a-f0-9]{64}$/i.test(saved.aud))throw Error('Cloudflare did not return a valid launcher audience');
    plan.launcher_access_aud=saved.aud;

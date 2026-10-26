@@ -39,7 +39,7 @@ export async function verifyEmailCode(req:Request,env:AuthEnv,data:Record<string
  // All three operations are synchronous in one SQLite transaction: guesses cannot race or codes be replayed.
  const result=env.DB.batch([
   env.DB.prepare('UPDATE email_logins SET attempts=attempts+1 WHERE id=? AND browser_hash=? AND attempts<5 AND expires_at>?').bind(id,browserHash,now()),
-  env.DB.prepare(`INSERT INTO sessions(token_hash,user_id,expires_at,created_at) SELECT ?,u.id,?,? FROM email_logins e JOIN users u ON u.id=e.user_id WHERE e.id=? AND e.browser_hash=? AND e.code_hash=? AND e.attempts<=5 AND e.expires_at>? AND u.active=1`).bind(tokenHash,now()+ttl,now(),id,browserHash,codeHash,now()),
+  env.DB.prepare(`INSERT INTO sessions(token_hash,user_id,expires_at,created_at,auth_method,authenticated_at) SELECT ?,u.id,?,?,'email',? FROM email_logins e JOIN users u ON u.id=e.user_id WHERE e.id=? AND e.browser_hash=? AND e.code_hash=? AND e.attempts<=5 AND e.expires_at>? AND u.active=1`).bind(tokenHash,now()+ttl,now(),now(),id,browserHash,codeHash,now()),
   env.DB.prepare('DELETE FROM email_logins WHERE id=? AND browser_hash=? AND (code_hash=? OR attempts>=5)').bind(id,browserHash,codeHash)
  ]);
  return result[1].meta.changes===1?token:null;
