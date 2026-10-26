@@ -1,4 +1,4 @@
-import { schemaV1, schemaV2, schemaV3, schemaV4 } from './schema.ts';
+import { schemaV1, schemaV2, schemaV3, schemaV4, schemaV5 } from './schema.ts';
 
 type Value = string | number | null | ArrayBuffer | ArrayBufferView;
 
@@ -22,7 +22,7 @@ class Statement {
   }
 }
 export class SqlStore {
-  constructor(private storage: DurableObjectStorage) {
+  constructor(private storage: DurableObjectStorage, legacyAppIDs:readonly string[]=[]) {
     storage.transactionSync(() => {
       storage.sql.exec('CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)');
       const version = storage.sql.exec<{v:number}>('SELECT COALESCE(MAX(version),0) AS v FROM schema_version').one().v;
@@ -42,8 +42,17 @@ export class SqlStore {
         storage.sql.exec(schemaV4);
         storage.sql.exec('INSERT INTO schema_version(version) VALUES(4)');
       }
+      if(version < 5) {
+        storage.sql.exec(schemaV5);
+        // Snapshot only users already present at the upgrade. This runs once in
+        // the same transaction as the version marker; future enrollments and
+        // restarts cannot acquire or restore grants through this migration.
+        for(const appID of legacyAppIDs)storage.sql.exec("INSERT INTO user_app_permissions(user_id,app_id) SELECT id,? FROM users WHERE active=1 AND role='family'",appID);
+        storage.sql.exec('INSERT INTO schema_version(version) VALUES(5)');
+      }
     });
   }
+  transaction<T>(callback:()=>T):T { return this.storage.transactionSync(callback); }
   prepare(query: string) { return new Statement(this.storage.sql, query); }
   batch(statements: Statement[]) {
     return this.storage.transactionSync(() => statements.map(statement => statement.run()));

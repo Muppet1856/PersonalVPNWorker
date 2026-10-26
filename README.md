@@ -8,7 +8,7 @@ Despite the repository name, this project currently provides **authentication**,
 
 Implemented: first-administrator bootstrap, one-time invitations, WebAuthn passkey registration and login, Resend email-code sign-in, server-side sessions, logout, administrator invitation creation, a user management console and optional Resend invitation emails, a minimal portal/app launcher, OIDC Authorization Code + S256 PKCE federation, persistent RS256 signing keys, public discovery/JWKS, and optional Cloudflare Access API provisioning. SQLite storage initializes automatically: no D1 database, database ID, or separate migration command is needed.
 
-Not implemented yet: Sign in with Apple, account recovery, multiple-passkey administration, audit trails and complete production hardening. The OIDC implementation supports one preconfigured confidential Cloudflare Access client; it is not a general-purpose, conformance-certified identity platform. This milestone is for development and evaluation; finish those controls before using it as a production identity provider.
+Implemented locally: multiple-passkey management and opt-in family email recovery with security-event records. Not implemented yet: Sign in with Apple, comprehensive audit administration and complete production hardening. The OIDC implementation supports one preconfigured confidential Cloudflare Access client; it is not a general-purpose, conformance-certified identity platform. This milestone is for development and evaluation; finish those controls before using it as a production identity provider.
 
 ## Quick start
 
@@ -203,6 +203,19 @@ Disable an existing Cloudflare Workers Builds integration for the same branch/Wo
 
 If you prefer Cloudflare-managed builds instead of GitHub deployment, disable `deploy.yml` in GitHub Actions. Connect the repository in Cloudflare, use `npm ci && npm run build` as the build command and `npm run deploy` as the deploy command, supply the configuration values as build variables, and set `ADMIN_SETUP_SECRET` separately as a Worker runtime secret. `WORKER_NAME` must match the connected Worker.
 
+## Passkeys and account recovery
+
+Signed-in users have a **Passkeys & recovery** panel to list, name, add and remove passkeys without creating a new account. Keep a second working passkey on a separate device or security key. The server preserves the existing user ID (and OIDC subject); invitations are still only for new accounts.
+
+- Security changes require a passkey verified within the last five minutes. Use **Verify with a passkey** when prompted. Old sessions have no trusted authentication method until verified again.
+- The last passkey cannot be removed, including concurrent removal attempts. Removing a key revokes portal sessions authenticated with that key and outstanding OIDC codes/tokens. It does not delete the key on the physical device or revoke already-issued Cloudflare Access sessions.
+- **Email recovery is off by default**, including for existing users. Family members can enable it with fresh passkey verification when email delivery is configured. Ordinary email sign-in remains available whether or not recovery is enabled.
+- An opted-in family member who loses a device can sign in using an email code, then add a replacement key within five minutes. Other portal sessions and outstanding OIDC credentials are revoked. Verify with the new key before removing a lost key or changing other security settings.
+- **Administrators cannot use mailbox-only recovery or mailbox-only privileged actions.** Administrator email sign-in remains available for ordinary access and still authenticates the administrator identity to downstream applications; this is not passkey-only administrator login. Adding/removing keys and administrative changes require a live, freshly verified passkey. If all administrator keys are lost, stop and obtain an independently verified operator recovery procedure; this implementation intentionally does not create a mailbox-based administrator bypass or a new identity.
+- Changes record security events and attempt notification to the account's existing email. Provider acceptance is not proof of delivery. The UI explicitly reports failed/unconfigured notifications; failed delivery does not roll back an already-completed security change. Delivery retries/webhooks and an audit console remain future work.
+
+For app grants and the required external Cloudflare Access policies, see [per-user app permissions](docs/app-permissions.md). Do not treat hidden application links as an authorization boundary.
+
 ## Development and validation
 
 ```sh
@@ -237,7 +250,7 @@ The source is organized as follows:
 
 Passkey private keys remain with authenticators. The server stores public credentials and hashes of invitation/session tokens. Registration identity and display name are bound to server-issued challenges. Challenges are consumed atomically; enrollment writes execute inside synchronous SQLite transactions. HTML branding is escaped before rendering.
 
-The current UI uses inline scripts. Basic per-IP/path request throttling and expired-record cleanup are included. Remaining hardening includes strict CSP/client bundling, stronger anti-abuse and enumeration resistance, audit events, individual passkey/session management, a tested recovery policy, and independent OIDC conformance/security review.
+The current UI uses inline scripts. Basic per-IP/path request throttling and expired-record cleanup are included. Remaining hardening includes strict CSP/client bundling, stronger anti-abuse and enumeration resistance, comprehensive audit administration, individual session management, deployed recovery validation, and independent OIDC conformance/security review.
 
 Keep local DNS, reverse proxies, existing tunnels, VPNs and port forwarding under your own deployment's control. This application does not configure or change them. Do not place the future OIDC provider behind its own Cloudflare Access login, which would create an authentication loop.
 
@@ -248,6 +261,6 @@ Never commit `.env.deploy.local`, `.dev.vars.local`, invitation tokens, signing 
 ## Roadmap
 
 1. Independent OIDC conformance/security review and real Cloudflare Access interoperability validation.
-2. Individual credential/session administration, audit events and recovery policy.
+2. Individual session administration, comprehensive audit tooling and deployed recovery drills.
 3. Invite-only Sign in with Apple linking and delivery webhooks/queueing.
 4. Deployment-specific external rollout tests and network changes, if desired.

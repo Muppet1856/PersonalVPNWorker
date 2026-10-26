@@ -1,3 +1,6 @@
+import { permittedApps } from './permissions.ts';
+import { accountScript } from './account-ui.ts';
+import { handleAccount } from './account.ts';
 import {requestEmailCode,verifyEmailCode} from './email-login.ts';
 import { uiAsset } from './ui-assets.ts';
 import {
@@ -14,7 +17,7 @@ import { settings, type Settings } from './config.ts';
 import { handleOIDC, throttle, cleanup, oidcConfigured } from './oidc.ts';
 
 export type AuthEnv = Settings & EmailEnv & { DB: SqlStore; PUBLIC_ORIGIN: string; RP_ID: string; ADMIN_SETUP_SECRET?: string; ACCESS_TEAM_DOMAIN?: string; OIDC_CLIENT_ID?: string; OIDC_CLIENT_SECRET?: string; APP_LINKS_JSON?: string; LAUNCHER_ORIGIN?: string; LAUNCHER_ACCESS_AUD?: string };
-export type User = { id:string; email:string; name:string; role:string; active:number; auth_time:number };
+export type User = { id:string; email:string; name:string; role:string; active:number; auth_time:number; auth_method?:string; credential_id?:string|null; access_revision:number };
 type Challenge = { id:string; user_id:string; challenge:string; expires_at:number; registration_user_id?:string; display_name?:string };
 type KeyRow = { id:string; user_id:string; public_key:ArrayBuffer; counter:number; transports:string };
 const now = () => Math.floor(Date.now()/1000);
@@ -33,9 +36,12 @@ function sessionCookie(token:string,env:AuthEnv,policy:{ttl:number;persistent:bo
  const expiry=policy.persistent?` Max-Age=${policy.ttl}; Expires=${new Date((now()+policy.ttl)*1000).toUTCString()};`:'';
  return `${settings(env).cookieName}=${token}; HttpOnly; SameSite=Lax; Path=/;${expiry}${secure(env)}`;
 }
+function sessionByHash(env:AuthEnv,hash:string):User|null {
+ return env.DB.prepare(`SELECT u.id,u.email,u.name,u.role,u.active,u.access_revision,CASE WHEN s.authenticated_at>0 THEN s.authenticated_at ELSE s.created_at END AS auth_time,s.auth_method,s.credential_id FROM sessions s JOIN users u ON s.user_id=u.id WHERE s.token_hash=? AND s.expires_at>? AND u.active=1 AND (s.auth_method<>'passkey' OR EXISTS(SELECT 1 FROM passkeys p WHERE p.id=s.credential_id AND p.user_id=u.id))`).bind(hash,now()).first<User>();
+}
+function freshAdmin(actor:User|null):boolean {return !!actor&&actor.role==='admin'&&actor.auth_method==='passkey'&&actor.auth_time>now()-300&&actor.auth_time<=now();}
 async function session(req:Request,env:AuthEnv):Promise<User|null>{
- const token=cookie(req,settings(env).cookieName); if(!token)return null;
- return (await env.DB.prepare(`SELECT u.id,u.email,u.name,u.role,u.active,s.created_at AS auth_time FROM sessions s JOIN users u ON s.user_id=u.id WHERE s.token_hash=? AND s.expires_at>? AND u.active=1`).bind(await digest(token),now()).first<User>())??null;
+ const token=cookie(req,settings(env).cookieName); return token?sessionByHash(env,await digest(token)):null;
 }
 async function body(req:Request):Promise<any>{
  if(!req.headers.get('content-type')?.toLowerCase().startsWith('application/json'))throw new InputError('Expected JSON',415);
@@ -49,7 +55,7 @@ class InputError extends Error {constructor(message:string,readonly status:numbe
 
 function requireOrigin(req:Request,env:AuthEnv):boolean {const origin=req.headers.get('origin');return origin===env.PUBLIC_ORIGIN;}
 function html(content:string){return new Response(content,{headers:{'content-type':'text/html; charset=utf-8','cache-control':'no-store','content-security-policy':"default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",'x-content-type-options':'nosniff','referrer-policy':'no-referrer'}});}
-async function issueSession(userId:string,env:AuthEnv,ttl=settings(env).sessionTTL){const token=rand()+rand();const inserted=await env.DB.prepare('INSERT INTO sessions(token_hash,user_id,expires_at,created_at) SELECT ?,id,?,? FROM users WHERE id=? AND active=1').bind(await digest(token),now()+ttl,now(),userId).run();if(inserted.meta.changes!==1)throw new InputError('Account unavailable',403);return token;}
+async function issueSession(userId:string,env:AuthEnv,ttl=settings(env).sessionTTL,credentialId:string){const token=rand()+rand();const inserted=await env.DB.prepare("INSERT INTO sessions(token_hash,user_id,expires_at,created_at,auth_method,authenticated_at,credential_id) SELECT ?,id,?,?,'passkey',?,? FROM users WHERE id=? AND active=1 AND EXISTS(SELECT 1 FROM passkeys WHERE id=? AND user_id=users.id)").bind(await digest(token),now()+ttl,now(),now(),credentialId,userId,credentialId).run();if(inserted.meta.changes!==1)throw new InputError('Account unavailable',403);return token;}
 const siteName=(env:AuthEnv)=>settings(env).siteName;
 const page=(name:string)=>portalShell(name)+`<script>
 const appIcons=${JSON.stringify(APP_ICONS)};
@@ -61,7 +67,7 @@ const bytes=s=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')),c=>c.
 async function api(url,data){const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},credentials:'same-origin',body:JSON.stringify(data)});const j=await r.json();if(!r.ok)throw Error(j.error||'Request failed');return j}
 async function finishOIDC(){const id=new URLSearchParams(location.search).get('oidc_request');if(!id)return;const r=await fetch('/oidc/continue',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({request_id:id})});const result=await r.json();if(!r.ok)throw Error(result.error||'Could not continue login');location.assign(result.redirect);}
 $('oidcNotice').hidden=!continuingLogin;
-async function refresh(){const r=await fetch('/api/me');const m=await r.json();const showDashboard=!!m.user&&!continuingLogin;$('emailLogin').hidden=!m.email_login_ready;emailReady=!!m.email_ready;$('createInvite').textContent=emailReady?'Create and email invitation':'Create invitation link';$('inviteHelp').textContent=emailReady?'An invitation email will be sent to this address.':'Share invitation links privately with the person you are inviting.';document.body.classList.toggle('logged-in',showDashboard);$('logout').hidden=!m.user;if(continuingLogin)$('oidcNotice').textContent=m.user?'Sign in again to continue to your application.':'Sign in to continue to your application.';$('me').textContent=m.user?'Signed in: '+m.user.name+' ('+m.user.email+')':'Not signed in';$('admin').hidden=!showDashboard||m.user.role!=='admin';$('management').hidden=$('admin').hidden;$('adminColumn').hidden=$('admin').hidden;$('appsColumn').className=$('admin').hidden?'col-12':'col-lg-8';$('signin').hidden=showDashboard;$('enroll').hidden=!!m.user;if($('admin').hidden){$('usersList').replaceChildren();$('invitesList').replaceChildren();}$('connections').hidden=!showDashboard;$('appLinks').replaceChildren();for(const app of m.apps||[]){const a=document.createElement('a');const url=new URL(app.url);if(url.protocol!=='https:')continue;a.href=url.href;a.target=continuingLogin?'_self':'_blank';a.rel='noopener noreferrer';a.className='app-tile';const icon=document.createElement('span');icon.className='app-icon';icon.dataset.icon=app.icon;icon.innerHTML=Object.hasOwn(appIcons,app.icon)?appIcons[app.icon]:appIcons.grid;const copy=document.createElement('span');const title=document.createElement('span');title.className='app-title';title.textContent=app.name;const host=document.createElement('span');host.className='app-host';host.textContent=url.hostname;copy.append(title,host);const arrow=document.createElement('span');arrow.className='app-arrow';arrow.textContent='↗';arrow.setAttribute('aria-hidden','true');a.append(icon,copy,arrow);$('appLinks').append(a);}if(m.user&&!(m.apps||[]).length)$('appLinks').textContent=m.oidc_ready?'Open a protected application to sign in through Cloudflare Access.':'Cloudflare Access connection is not configured yet.';if(!$('management').hidden)await refreshAdmin();}
+async function refresh(){const r=await fetch('/api/me');const m=await r.json();const showDashboard=!!m.user&&!continuingLogin;$('emailLogin').hidden=!m.email_login_ready;emailReady=!!m.email_ready;$('createInvite').textContent=emailReady?'Create and email invitation':'Create invitation link';$('inviteHelp').textContent=emailReady?'An invitation email will be sent to this address.':'Share invitation links privately with the person you are inviting.';document.body.classList.toggle('logged-in',showDashboard);$('logout').hidden=!m.user;if(continuingLogin)$('oidcNotice').textContent=m.user?'Sign in again to continue to your application.':'Sign in to continue to your application.';$('me').textContent=m.user?'Signed in: '+m.user.name+' ('+m.user.email+')':'Not signed in';$('admin').hidden=!showDashboard||m.user.role!=='admin';$('management').hidden=$('admin').hidden;$('adminColumn').hidden=$('admin').hidden;$('appsColumn').className=$('admin').hidden?'col-12':'col-lg-8';$('signin').hidden=showDashboard;$('enroll').hidden=!!m.user;if($('admin').hidden){$('usersList').replaceChildren();$('invitesList').replaceChildren();}$('connections').hidden=!showDashboard;$('accountSecurity').hidden=!showDashboard;if(!showDashboard){$('passkeysList').replaceChildren();accountState=null;}$('appLinks').replaceChildren();for(const app of m.apps||[]){const a=document.createElement('a');const url=new URL(app.url);if(url.protocol!=='https:')continue;a.href=url.href;a.target=continuingLogin?'_self':'_blank';a.rel='noopener noreferrer';a.className='app-tile';const icon=document.createElement('span');icon.className='app-icon';icon.dataset.icon=app.icon;icon.innerHTML=Object.hasOwn(appIcons,app.icon)?appIcons[app.icon]:appIcons.grid;const copy=document.createElement('span');const title=document.createElement('span');title.className='app-title';title.textContent=app.name;const host=document.createElement('span');host.className='app-host';host.textContent=url.hostname;copy.append(title,host);const arrow=document.createElement('span');arrow.className='app-arrow';arrow.textContent='↗';arrow.setAttribute('aria-hidden','true');a.append(icon,copy,arrow);$('appLinks').append(a);}if(m.user&&!(m.apps||[]).length)$('appLinks').textContent=m.oidc_ready?'Open a protected application to sign in through Cloudflare Access.':'Cloudflare Access connection is not configured yet.';if(!$('management').hidden)await refreshAdmin();if(showDashboard)await refreshAccount();}
 
 
 function memberText(parent,tag,text){const node=document.createElement(tag);node.textContent=text;parent.append(node);return node;}
@@ -71,6 +77,10 @@ async function refreshAdmin(){
  const [members,pending]=await Promise.all([readAdmin('/api/admin/users'),readAdmin('/api/admin/invites')]);
  $('usersList').replaceChildren();$('invitesList').replaceChildren();
  for(const user of members.users){const row=document.createElement('section');row.className='member';memberText(row,'strong',user.name);memberText(row,'p',user.email);memberText(row,'small',(user.role==='admin'?'Administrator':'Family member')+' · '+(user.active?'Active':'Disabled')+' · '+user.passkey_count+' passkey(s) · '+user.session_count+' portal session(s)');memberText(row,'small',user.last_sign_in?'Last sign-in: '+new Date(user.last_sign_in*1000).toLocaleString():'No passkey sign-in recorded');
+ if(user.role!=='admin'){
+ const permissions=document.createElement('fieldset');permissions.className='mt-3';memberText(permissions,'legend','Allowed apps');const checks=[];for(const app of members.apps||[]){const label=document.createElement('label');label.className='form-check small';const input=document.createElement('input');input.type='checkbox';input.className='form-check-input';input.value=app.id;input.checked=(user.allowed_apps||[]).includes(app.id);const text=document.createElement('span');text.textContent=app.name;label.append(input,text);permissions.append(label);checks.push(input);}row.append(permissions);
+ memberButton(row,'Save app access',async()=>{if(!confirm('Update app permissions for '+user.email+'? Their portal sessions will be revoked. Existing Cloudflare Access sessions must be revoked separately.'))return;await api('/api/admin/users',{user_id:user.id,action:'set_apps',allowed_apps:checks.filter(x=>x.checked).map(x=>x.value)});say('App grants updated. Revoke existing Cloudflare Access sessions separately; per-app claim policies must be configured to enforce direct access.');});
+ }
  if(user.role!=='admin')memberButton(row,user.active?'Disable account':'Enable account',async()=>{if(user.active&&!confirm('Disable '+user.email+' and sign out their portal sessions?'))return;await api('/api/admin/users',{user_id:user.id,action:user.active?'disable':'enable'});say(user.active?'Account disabled.':'Account enabled.');},!!user.active);
  memberButton(row,'Sign out everywhere',async()=>{if(!confirm('Sign out all portal sessions for '+user.email+'? Cloudflare Access sessions are managed separately.'))return;await api('/api/admin/users',{user_id:user.id,action:'revoke_sessions'});say('Portal sessions revoked.');});$('usersList').append(row);}
  for(const invitation of pending.invitations){const row=document.createElement('section');row.className='member';memberText(row,'strong',invitation.email);memberText(row,'small','Expires: '+new Date(invitation.expires_at*1000).toLocaleString());if(invitation.role!=='admin')memberButton(row,'Revoke invitation',async()=>{if(!confirm('Revoke the unused invitation for '+invitation.email+'?'))return;await api('/api/admin/invites/revoke',{invitation_id:invitation.id});say('Invitation revoked.');},true);$('invitesList').append(row);}
@@ -93,6 +103,7 @@ $('createInvite').onclick=async()=>{if(!$('newEmail').reportValidity())return;co
 $('rotateKey').onclick=async()=>{try{const r=await api('/api/admin/oidc/rotate',{});say('Signing key rotated. Existing public keys remain available for 24 hours. New key: '+r.kid)}catch(e){say(String(e))}};
 const invitation=new URLSearchParams(location.hash.slice(1)).get('invite');if(invitation){$('enroll').open=true;$('invite').value=invitation;history.replaceState(null,'',location.pathname+location.search);$('displayName').focus();}
 async function logout(){try{const result=await api('/api/logout',{});if(result.logout_url){say('Signing out of protected applications…');location.assign(result.logout_url);return;}say('Signed out');await refresh()}catch(e){say(String(e))}}
+${accountScript}
 $('logout').onclick=logout;refresh().catch(e=>say(String(e)));
 </script></body></html>`;
 
@@ -102,15 +113,20 @@ export default {async fetch(req:Request,env:AuthEnv):Promise<Response>{
  const path=new URL(req.url).pathname;
  if((req.method==='POST'||path==='/oidc/authorize')&&!throttle(req,env))return json({error:'Too many requests; try again shortly'},429,{'retry-after':'60'});
  cleanup(env);
- if(path.startsWith('/oidc/')||path==='/.well-known/openid-configuration'||path==='/api/admin/oidc/rotate')return await handleOIDC(req,env,()=>session(req,env));
+ const requestSessionHash=await digest(cookie(req,settings(env).cookieName)||'');
+ if(req.method==='POST'&&path.startsWith('/api/admin/')){if(!freshAdmin(sessionByHash(env,requestSessionHash)))return failure('Verify an administrator passkey within the last five minutes',403);}
+ if(path.startsWith('/oidc/')||path==='/.well-known/openid-configuration'||path==='/api/admin/oidc/rotate')return await handleOIDC(req,env,()=>sessionByHash(env,requestSessionHash));
  if(req.method==='GET'&&path==='/')return html(page(siteName(env)));
+ if(req.method==='GET'&&path==='/api/account')return handleAccount(req,env);
  if(req.method==='GET'&&path==='/health')return json({status:'ok'});
- if(req.method==='GET'&&path==='/api/me'){const u=await session(req,env);return json({user:u,apps:u?JSON.parse(env.APP_LINKS_JSON||'[]').map((app:{name:string;url:string;icon?:string})=>({...app,icon:appIconKey(app.name,app.url,app.icon)})):[],oidc_ready:oidcConfigured(env),email_login_ready:emailConfigured(env),email_ready:!!u&&u.role==='admin'&&emailConfigured(env)});}
+ if(req.method==='GET'&&path==='/api/me'){const u=await session(req,env);return json({user:u,apps:u?permittedApps(env,u).map((app:{name:string;url:string;icon?:string})=>({...app,icon:appIconKey(app.name,app.url,app.icon)})):[],oidc_ready:oidcConfigured(env),email_login_ready:emailConfigured(env),email_ready:!!u&&u.role==='admin'&&emailConfigured(env)});}
  if(req.method==='GET'&&(path==='/api/admin/users'||path==='/api/admin/invites'))return manageUsers(req,env,await session(req,env));
  if(req.method!=='POST')return failure('Not found',404);
  if(!requireOrigin(req,env))return failure('Invalid origin',403);
  const data=await body(req);
- if(path==='/api/admin/users'||path==='/api/admin/invites/revoke')return manageUsers(req,env,await session(req,env),data);
+ if(path.startsWith('/api/admin/')&&!freshAdmin(sessionByHash(env,requestSessionHash)))return failure('Verify an administrator passkey within the last five minutes',403);
+ if(path.startsWith('/api/account/'))return handleAccount(req,env,data);
+ if(path==='/api/admin/users'||path==='/api/admin/invites/revoke')return manageUsers(req,env,sessionByHash(env,requestSessionHash),data);
  if(path==='/api/email/request')return requestEmailCode(req,env,data);
  if(path==='/api/email/verify'){
   const policy=sessionPolicy(data,env);const token=await verifyEmailCode(req,env,data,policy.ttl);
@@ -147,7 +163,7 @@ export default {async fetch(req:Request,env:AuthEnv):Promise<Response>{
     env.DB.prepare('UPDATE invites SET used_at=? WHERE token_hash=? AND used_at IS NULL AND EXISTS(SELECT 1 FROM users WHERE id=?)').bind(now(),hash,userId)
   ]);
   if(result.some(x=>!x.success||x.meta.changes!==1))return failure('Registration failed',409);
-  const s=await issueSession(userId,env,policy.ttl);return json({ok:true},200,{'set-cookie':sessionCookie(s,env,policy)});
+  const s=await issueSession(userId,env,policy.ttl,c.id);return json({ok:true},200,{'set-cookie':sessionCookie(s,env,policy)});
  }
  if(path==='/api/login/options'){
   const email=String(data.email||'').trim().toLowerCase();const u=await env.DB.prepare('SELECT id FROM users WHERE email=? AND active=1').bind(email).first<{id:string}>();if(!u)return failure('Account or passkey unavailable',403);
@@ -162,7 +178,7 @@ export default {async fetch(req:Request,env:AuthEnv):Promise<Response>{
   if(!verified.verified)return failure('Authentication failed',403);
   const updated=await env.DB.prepare('UPDATE passkeys SET counter=?,last_used_at=? WHERE id=? AND counter=? RETURNING id').bind(verified.authenticationInfo.newCounter,now(),k.id,k.counter).first();
   if(!updated)return failure('Please sign in again',409);
-  const s=await issueSession(ch.user_id,env,policy.ttl);return json({ok:true},200,{'set-cookie':sessionCookie(s,env,policy)});
+  const s=await issueSession(ch.user_id,env,policy.ttl,k.id);return json({ok:true},200,{'set-cookie':sessionCookie(s,env,policy)});
  }
  if(path==='/api/admin/invite'){
   const u=await session(req,env);if(!u||u.role!=='admin')return failure('Forbidden',403);
@@ -176,6 +192,7 @@ export default {async fetch(req:Request,env:AuthEnv):Promise<Response>{
   if(recent&&(recent.n>=3||(recent.latest!==null&&recent.latest>now()-60)))return json({error:'Wait at least 60 seconds between invitations; maximum three per address per hour'},429,{'retry-after':'60'});
   const token=rand()+rand(),hash=await digest(token),ttl=settings(env).inviteTTL,expires=now()+ttl;
   // Recheck the reservation atomically because async hashing/session reads can interleave.
+  if(!freshAdmin(sessionByHash(env,requestSessionHash)))return failure('Verify an administrator passkey within the last five minutes',403);
   const reserved=await env.DB.prepare('INSERT INTO invites(token_hash,email,role,expires_at,created_by,created_at) SELECT ?,?,?,?,?,? WHERE (SELECT COUNT(*) FROM invites WHERE email=? AND created_by=? AND created_at>?)<3 AND NOT EXISTS(SELECT 1 FROM invites WHERE email=? AND created_by=? AND created_at>?)').bind(hash,email,'family',expires,u.id,now(),email,u.id,now()-3600,email,u.id,now()-60).run();
   if(reserved.meta.changes!==1)return json({error:'Please wait before inviting this address again'},429,{'retry-after':'60'});
   const delivery=data.send_email?await sendInvitation(env,email,token,expires,hash):'manual';

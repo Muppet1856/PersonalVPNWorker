@@ -94,7 +94,7 @@ test('OIDC migration preserves the previous passkey schema and existing users',a
  const {schemaV1}=await import('../src/schema.ts');const sql=new DatabaseSync(':memory:');
  sql.exec(schemaV1);sql.exec("CREATE TABLE schema_version(version INTEGER PRIMARY KEY);INSERT INTO schema_version VALUES(1);INSERT INTO users(id,email,name,role,created_at) VALUES('existing','existing@example.com','Existing','admin',1)");
  sql.prepare('INSERT INTO passkeys(id,user_id,public_key,counter,device_type,created_at) VALUES(?,?,?,?,?,?)').run('key','existing',Buffer.from([1,2,3]),4,'singleDevice',1);
- new DB(sql);assert.equal(sql.prepare('SELECT counter FROM passkeys WHERE id=?').get('key').counter,4);assert.equal(sql.prepare('SELECT MAX(version) AS v FROM schema_version').get().v,4);
+ new DB(sql);assert.equal(sql.prepare('SELECT counter FROM passkeys WHERE id=?').get('key').counter,4);assert.equal(sql.prepare('SELECT MAX(version) AS v FROM schema_version').get().v,5);
  assert.ok(sql.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='oidc_keys'").get());
 });
 test('OIDC expired codes and disabled accounts cannot obtain identity tokens',async()=>{
@@ -135,7 +135,7 @@ test('portal consumes invitation fragments without an automatic enrollment reque
 test('email schema migration preserves existing v2 invitations and passkey accounts',async()=>{
  const {schemaV1,schemaV2}=await import('../src/schema.ts');const sql=new DatabaseSync(':memory:');sql.exec(schemaV1);sql.exec(schemaV2);sql.exec('CREATE TABLE schema_version(version INTEGER PRIMARY KEY);INSERT INTO schema_version VALUES(2)');
  sql.prepare('INSERT INTO invites(token_hash,email,role,expires_at,created_by) VALUES(?,?,?,?,?)').run('existing-hash','family@example.com','family',2000000000,'existing-admin');
- new DB(sql);const invite=sql.prepare('SELECT * FROM invites').get();assert.equal(invite.token_hash,'existing-hash');assert.equal(invite.expires_at,2000000000);assert.equal(invite.created_at,0);assert.equal(sql.prepare('SELECT MAX(version) AS v FROM schema_version').get().v,4);
+ new DB(sql);const invite=sql.prepare('SELECT * FROM invites').get();assert.equal(invite.token_hash,'existing-hash');assert.equal(invite.expires_at,2000000000);assert.equal(invite.created_at,0);assert.equal(sql.prepare('SELECT MAX(version) AS v FROM schema_version').get().v,5);
 });
 
 test('user management is administrator-only and rejects cross-origin mutations',async()=>{
@@ -205,13 +205,13 @@ test('enrollment honors the remembered-session lifetime configuration',async()=>
 });
 
 test('direct portal visits launch separate tabs while app sign-in keeps re-authentication visible',async()=>{
- const f=fixture();const page=await (await f.call('/')).text();const refreshSource=page.match(/async function refresh\(\)\{[^\n]*\}/)[0];
+ const f=fixture();const page=await (await f.call('/')).text();new Function(page.match(/<script>([\s\S]*)<\/script>/)[1]);const refreshSource=page.match(/async function refresh\(\)\{[^\n]*\}/)[0];
  for(const continuing of [false,true]){
   const nodes=new Map();const node=()=>({hidden:false,dataset:{},children:[],classList:{toggle(){}},replaceChildren(){this.children=[]},append(...children){this.children.push(...children)},setAttribute(){}});
   const get=id=>{if(!nodes.has(id))nodes.set(id,node());return nodes.get(id);};let dashboard;
   const document={body:{classList:{toggle(name,value){dashboard=value;}}},createElement:()=>node()};
   const fetcher=async()=>({json:async()=>({user:{name:'Member',email:'member@example.com',role:'family'},apps:[{name:'Chat',url:'https://chat.example.com',icon:'chat'}],oidc_ready:true,email_ready:false})});
-  const refresh=new Function('$','fetch','continuingLogin','document','refreshAdmin','appIcons',`let emailReady=false;return (${refreshSource});`)(get,fetcher,continuing,document,()=>{throw Error('Unexpected administrator request');},{grid:'<svg></svg>'});
+  const refresh=new Function('$','fetch','continuingLogin','document','refreshAdmin','appIcons','refreshAccount',`let emailReady=false;return (${refreshSource});`)(get,fetcher,continuing,document,()=>{throw Error('Unexpected administrator request');},{grid:'<svg></svg>'},async()=>{});
   await refresh();assert.equal(dashboard,!continuing);assert.equal(get('signin').hidden,!continuing);
   const link=get('appLinks').children[0];assert.equal(link.target,continuing?'_self':'_blank');assert.equal(link.rel,'noopener noreferrer');
  }

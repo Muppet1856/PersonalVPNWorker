@@ -35,6 +35,8 @@ test('Access provisioning is idempotent and allows only the configured identity 
  assert.equal(m.state.calls.filter(x=>x.path==='/apps'&&x.method==='POST').length,1);
  assert.deepEqual(m.state.apps[0].allowed_idps,['idp-1']);assert.equal(m.state.apps[0].auto_redirect_to_identity,true);
  assert.deepEqual(m.state.policies[0].include,[{login_method:{id:'idp-1'}}]);assert.equal(m.state.policies[0].decision,'allow');
+ assert.deepEqual(m.state.idps[0].config.claims,['allowed_apps']);
+ assert.deepEqual(m.state.policies[0].require,[{oidc:{claim_name:'allowed_apps',claim_value:'chat.example.com',identity_provider_id:'idp-1'}}]);
 });
 test('Access refuses to overwrite unrelated applications before making writes',async()=>{
  const m=mock(true);await assert.rejects(configureAccess(env,{apply:true,fetcher:m.fetcher,log:()=>{}}),/not managed/);
@@ -49,5 +51,8 @@ test('launcher is protected as a separate application and returns its audience',
  const m=mock();const fetcher=async(url,init)=>{const response=await m.fetcher(url,init);const data=await response.json();if(init.method!=='GET'&&data.result?.domain==='access.example.com')data.result.aud='a'.repeat(64);return Response.json(data);};
  const plan=await configureAccess({...env,LAUNCHER_ORIGIN:'https://access.example.com'},{apply:true,fetcher,log:()=>{}});
  assert.equal(plan.launcher_access_aud,'a'.repeat(64));assert.equal(plan.applications.length,2);
+ const policies=m.state.calls.filter(x=>x.method==='POST'&&x.path.endsWith('/policies'));
+ assert.equal(policies[0].body.require[0].oidc.claim_value,'chat.example.com');
+ assert.deepEqual(policies[1].body.require,[]);
  const launcher=m.state.calls.find(x=>x.method==='POST'&&x.body?.domain==='access.example.com');assert.deepEqual(launcher.body.allowed_idps,['idp-1']);
 });
