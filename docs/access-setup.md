@@ -4,6 +4,8 @@ The Worker now implements the confidential-client OIDC authorization-code flow w
 
 Do not put this identity portal behind an Access application that depends on the same portal. Keep its discovery, authorization, token and JWKS endpoints publicly reachable.
 
+For a new application on a private device, use the [device Access and Tunnel runbook](device-access-tunnel.md) for the architecture and [network provisioning](network-setup.md) to automate Tunnel, DNS, WAF, and connector installation. Create Access protection before publishing its tunnel route.
+
 ## GitHub settings
 
 An existing Cloudflare Zero Trust organization and its free plan must already be initialized in your account. Find its team hostname in Cloudflare One **Settings → Team name and domain**. Use the exact hostname, e.g. `example.cloudflareaccess.com`; do not guess it from your own domain or include `https://`.
@@ -28,7 +30,7 @@ Example application configuration:
 ]
 ```
 
-Use existing application hostnames whose DNS/tunnels already work. Do not include the identity portal or team hostname, schemes, paths or wildcards. The same list populates the signed-in portal's app links. An empty list provisions only the identity provider, plus the launcher if configured.
+Use the exact application hostnames you intend to protect. For a new service, provision Access before publishing DNS/tunnel routes. Do not include the identity portal or team hostname, schemes, paths or wildcards. The same list populates the signed-in portal's app links. An empty list provisions only the identity provider, plus the launcher if configured.
 
 The Access token needs account permissions for **Access: Organizations, Identity Providers, and Groups Write** and **Access: Apps and Policies Write**, including their corresponding read access, scoped to the target account. The normal Worker deployment token stays separate. This script does not need DNS, tunnel, billing or Worker-edit permissions on its Access token. Do not add the Access token as a Worker runtime secret.
 
@@ -44,17 +46,22 @@ npm run access:plan
 
 This prints the intended provider, callback and applications. It makes no Cloudflare API requests and omits secrets. To review in GitHub, inspect the app list and settings before enabling `CONFIGURE_ACCESS=true`.
 
+For a read-only account inspection, supply `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_ACCESS_API_TOKEN` privately, then run `npm run access:inspect`. This needs read permissions but no OIDC client secret. It checks ownership and reports which applications/policies will be created, updated, or converted, along with existing application audiences. Use `npm run access:apply` for an intentional local application of the reviewed configuration; that additionally requires `OIDC_CLIENT_SECRET`. The GitHub opt-in workflow uses the same implementation.
+
 Once enabled, run **Actions → Deploy Worker → Run workflow** on `main`. The pipeline:
 
 1. Runs application tests and the Wrangler HTTP integration test.
 2. Deploys Worker code, configuration and the OIDC secret.
 3. Verifies deployed discovery and public-key endpoints.
 4. Validates your existing Zero Trust team domain and checks for configuration conflicts.
-5. Creates or updates only its named OIDC provider and listed applications/policies.
+5. Creates or updates its named OIDC provider, migrates owned legacy policies in place, and attaches reusable policy IDs to the listed applications.
+6. Reads back each policy, application attachment, and audience before reporting success.
 
-The provider is named `<client-id> (PersonalVPNWorker)`. Managed applications are named `<client-id>: <application-name>`. Their only allow policy accepts users authenticated through this identity provider; only active, invited accounts can obtain tokens from the Worker. Other login methods and unrelated Cloudflare applications are not changed.
+The provider is named `<client-id> (PersonalVPNWorker)`. Managed applications are named `<client-id>: <application-name>`. Each has its own reusable policy named `<client-id>: Members: <hostname>`. It includes this identity provider and requires the `allowed_apps` claim to contain that application's hostname. The launcher has its own member policy without an app-grant requirement. See [per-user permissions](app-permissions.md); being able to sign in or see a tile is not sufficient authorization.
 
-The script is repeatable but not transactional across Cloudflare resources. A failure may leave earlier resources configured; fix the reported cause and rerun. New applications default to denied access until their allow policy is saved. Existing applications or policies that do not match this project's ownership convention cause the script to stop before writes; it does not adopt or overwrite them. Removing an app from the list does not delete its existing protection. Keep managed names/client IDs stable; review renames manually.
+The script creates policies through `/access/policies` and attaches only their IDs to applications. It converts the project's old `<client-id>: Members` app-scoped policies with `make_reusable`, retaining the policy ID and attachment. Shorter policy/application sessions and supported MFA/approval/isolation options are retained. It refuses shared policies, conflicting policy names/selectors, overlapping host/path applications, and public destination overrides before writes. Do not attach a managed reusable policy to another application: that expands its ownership and will block automated updates.
+
+The script is repeatable but not transactional across Cloudflare resources. Interrupted conversions resume by policy ID, and a policy created before a failed application creation is reused on retry. No policy is deleted or detached during migration. Fix a reported failure and rerun; do not remove Access protection to recover. Removing an app from configuration leaves its existing protection intact. Keep managed names/client IDs stable and serialize provisioning with dashboard edits. Automated readback verifies configuration, not the complete user authentication flow.
 
 Disable Cloudflare Workers Builds if GitHub Actions is the deployment authority for this Worker. Test from outside local DNS overrides, preferably a private browser on cellular. Local DNS and reverse-proxy access remain unchanged.
 
@@ -91,7 +98,7 @@ If using the dashboard instead of API automation, leave `CONFIGURE_ACCESS` unset
 
 The only allowed callback is `https://<team>.cloudflareaccess.com/cdn-cgi/access/callback`. Hostnames match exactly; there is no wildcard callback or arbitrary return URL.
 
-Create a self-hosted Access application for each protected hostname. Select only this OIDC login method and create an Allow policy matching that login method. Keep your existing application login if you also need application-level authentication: Access adds an outer authentication layer, not automatic login to the underlying application.
+Create a self-hosted Access application for each protected hostname. Import `allowed_apps` as a custom OIDC claim, select only this OIDC login method, and attach a reusable Allow policy that includes that login method AND requires `allowed_apps` to contain the application's hostname. The launcher is the exception: it needs the login-method rule without the app claim. Keep your existing application login if you also need application-level authentication: Access adds an outer authentication layer, not automatic login to the underlying application.
 
 ## Operational details and limits
 

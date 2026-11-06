@@ -12,6 +12,10 @@ The public repository contains generic defaults. `scripts/configure.mjs` combine
 
 The current OIDC milestone provides one confidential client with RS256 signing, mandatory S256 PKCE, exact callbacks, browser-bound login continuation, and automatic schema version 2. See [Access setup](access-setup.md) for API provisioning and its boundaries.
 
-Future milestones retain invite-only membership: Sign in with Apple linking from authenticated sessions, Resend invitations/recovery with explicit recovery policy, and further hardening/conformance review of the OIDC implementation. Apple email alone must never auto-authorize membership.
+The Worker sends invitations, email sign-in codes, and account-security notifications directly through Resend's HTTPS API. Resend MCP supports operator setup and inspection; it is not in the runtime email path. See [Resend setup and email flows](resend-setup.md) for sender provisioning, Mermaid diagrams, delivery limits, and opt-in family recovery.
 
-Network access, local DNS, reverse proxies and existing tunnels stay outside this application's control. This is a private-group identity service, not a VPN tunnel server.
+Future milestones retain invite-only membership: Sign in with Apple linking from authenticated sessions and further hardening/conformance review of the OIDC implementation. Apple email alone must never auto-authorize membership.
+
+The Worker runtime is a private-group identity service, not a VPN tunnel server. Separate opt-in [operator scripts](network-setup.md) provision Access policies, Cloudflare Tunnel, public DNS, and hostname-scoped WAF/cache rules. Local DNS, reverse proxies, VPN routing, and device firewalls remain under the operator's control.
+
+See [device Access and Tunnel setup](device-access-tunnel.md) for the surrounding network architecture, Mermaid flows, WAF controls, and an operator runbook for applications behind an existing VPN/firewall.

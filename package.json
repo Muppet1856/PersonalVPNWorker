@@ -12,6 +12,11 @@
     "configure": "node --env-file-if-exists=.env.deploy.local scripts/configure.mjs",
     "test:wrangler": "node --test tests/wrangler.integration.mjs",
     "access:plan": "node --env-file-if-exists=.env.deploy.local scripts/configure-access.mjs",
+    "access:inspect": "node --env-file-if-exists=.env.deploy.local scripts/configure-access.mjs --inspect",
+    "access:apply": "node --env-file-if-exists=.env.deploy.local scripts/configure-access.mjs --apply",
+    "network:plan": "node --env-file-if-exists=.env.deploy.local scripts/configure-network.mjs",
+    "network:inspect": "node --env-file-if-exists=.env.deploy.local scripts/configure-network.mjs --inspect",
+    "network:apply": "node --env-file-if-exists=.env.deploy.local scripts/configure-network.mjs --apply",
     "postinstall": "node scripts/generate-ui-assets.mjs",
     "ui:build": "node scripts/generate-ui-assets.mjs"
   },

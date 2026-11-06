@@ -1,0 +1,20 @@
+{
+  "tunnel_name": "home-device",
+  "applications": [
+    {
+      "domain": "device.example.com",
+      "zone_id": "REPLACE_WITH_CLOUDFLARE_ZONE_ID",
+      "service": "http://127.0.0.1:8080",
+      "waf": {
+        "blocked_paths": ["/.env", "/.git"],
+        "managed_ruleset_ids": [],
+        "rate_limit": {
+          "paths": ["/api/login"],
+          "requests_per_period": 20,
+          "period": 10,
+          "mitigation_timeout": 10
+        }
+      }
+    }
+  ]
+}

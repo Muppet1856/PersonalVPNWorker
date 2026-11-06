@@ -2,6 +2,8 @@
 
 An invite-only, passkey-based access portal you can deploy on your own domain using **Cloudflare Workers and a SQLite-backed Durable Object**. It is designed for small private groups such as families and home labs. Branding, domain, Worker name and authentication lifetimes are configurable; no personal domain is built into the application.
 
+The intended outcome is to **expose a selected private network service to authenticated, authorized users**. A user connects to the service's public hostname, Cloudflare Access verifies their identity and service permission, and Cloudflare Tunnel carries the permitted request to `cloudflared` inside the private network. Users can reach that service without joining the site's existing VPN. The current provisioning automation implements this flow for HTTP(S) services.
+
 Despite the repository name, this project currently provides **authentication**, not a VPN tunnel. The Cloudflare Access integration can protect selected web applications. Network-level VPN access remains a separate service.
 
 ## Current milestone
@@ -38,6 +40,109 @@ Paste the returned token into **Accept family invitation**, enter your display n
 
 After creating your administrator passkey, follow [Cloudflare Access setup](docs/access-setup.md). The optional GitHub deployment step can configure the identity provider, self-hosted applications and member allow policies using Cloudflare's API. It defaults to **off**. The Worker’s discovery and public-key endpoints are checked after each deployment, even before an Access client is configured.
 
+To connect a device on the private side of an existing VPN/firewall, follow [the device Access and Tunnel runbook](docs/device-access-tunnel.md). It covers `cloudflared`, Access policies, WAF, origin restrictions, VPN routing, verification, and Mermaid flow diagrams.
+
+[Network provisioning](docs/network-setup.md) automates the Cloudflare-side setup and generates a private Linux connector installation bundle. Separate `network:plan`, `network:inspect`, and `network:apply` commands keep it opt-in. Access provisioning now uses reusable policies and migrates owned legacy policies in place.
+
+## YOLO setup with an AI agent
+
+Use a coding agent with this repository checked out, terminal access, and SSH access to the intended device. First install/connect these integrations in your agent's plugin or connector settings:
+
+| Integration | Setup | Used for |
+| --- | --- | --- |
+| Cloudflare plugin | Install the official Cloudflare plugin and complete account authorization. Follow the [Cloudflare plugin and MCP instructions](https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare/). If your client needs a separate remote MCP connection, use `https://mcp.cloudflare.com/mcp`. | Cloudflare documentation, account/zone discovery, infrastructure inspection, and DNS changes |
+| Resend MCP | Install the official Resend plugin, which includes its MCP server, or connect `https://mcp.resend.com/mcp` directly and sign in through OAuth. Follow the [Resend MCP instructions](https://resend.com/docs/mcp-server). | Sending-domain setup, verification, tracking settings, and email delivery checks |
+
+Reuse working connections; a plugin that already exposes the required tools does not need a duplicate MCP server. Verify the selected Cloudflare account and Resend workspace before making changes. MCP authorization does **not** supply the CLI provisioning tokens or the deployed Worker's `RESEND_API_KEY`. Supply those separately through private credential entry or a secret manager, following the linked setup guides.
+
+Replace the placeholders below, then paste the entire prompt into your agent. It authorizes live setup for the named service and one test email. OAuth sign-in and passkey enrollment still require your participation. This automates the current evaluation milestone described above; it does not complete the remaining identity-provider hardening.
+
+```text
+Set up this PersonalVPNWorker checkout end to end so authenticated, explicitly
+authorized users can reach my private HTTP(S) service through Cloudflare Access,
+WAF, and Tunnel. Users should not need to join my existing VPN.
+
+My settings:
+- Authentication portal URL: <https://auth.example.com>
+- Service name and public hostname: <My App; app.example.com>
+- Origin URL as reached from the connector: <http://127.0.0.1:8080>
+- Connector device SSH target: <user@host-or-ssh-alias>
+- Administrator email: <admin@example.com>
+- Emails allowed to access this service: <explicit email list>
+- Resend sender: <invites@mail.example.com>
+- Test email recipient I control: <admin@example.com>
+- Cloudflare account / Zero Trust team: discover existing settings; ask if ambiguous
+- Email invitations to the listed users: no, unless I change this to yes
+
+I authorize deploying this Worker, provisioning the scoped Access/Tunnel/DNS/WAF
+resources, configuring the Resend sending domain, installing cloudflared on the
+named device, and sending one setup test email to the test recipient above.
+Make routine decisions and continue through verification. Ask only for missing
+information you cannot discover, required human sign-in/passkey steps, resource
+conflicts, destructive changes, or paid plan changes. Respect tool permissions.
+
+1. Read applicable AGENTS.md instructions, README.md, docs/access-setup.md,
+   docs/network-setup.md, docs/device-access-tunnel.md, docs/app-permissions.md,
+   and docs/resend-setup.md. Check current provider documentation through the
+   Cloudflare plugin. Verify Cloudflare and Resend MCP
+   connections; if missing, guide me through installing/connecting them using
+   the README instructions, then resume. Use Resend MCP for domain operations.
+
+2. Discover the intended account, zone, Zero Trust team, existing deployment,
+   and device OS/network. Inspect existing SSH configuration and identity filenames
+   before requesting credentials; never read out private keys. Confirm that the
+   connector can reach the origin and Cloudflare while the existing VPN is active.
+   Preserve existing users, passkeys, Worker identity, RP_ID, and FAMILY_ID.
+
+3. Use Node.js 24 and the repository-pinned tools. Run npm ci, npm run check,
+   npm test, and npm run test:wrangler. Prepare the ignored .env.deploy.local and
+   .network.deploy.local.json files from their examples with real settings.
+   Include this hostname in ACCESS_APPS_JSON. Use available WAF managed rulesets
+   and meaningful rate limits for actual application paths; report plan limits.
+
+4. Use Resend MCP to create/reuse the sending domain, preferably a dedicated mail
+   subdomain. Use the Cloudflare plugin to install Resend's exact DNS records,
+   preserving existing mail routing and unrelated records. Request verification
+   and check the verified result. Disable open/click tracking for this sender.
+   Reuse or obtain a sending-only API key restricted to this domain through a
+   private credential handoff, then store it as RESEND_API_KEY in the deployment
+   secret store. Configure RESEND_FROM. Keep credentials, connector tokens,
+   invitation links, and sign-in codes out of source, chat, and logs.
+
+5. Deploy using the existing deployment workflow or the documented local flow.
+   Configure the matching OIDC_CLIENT_SECRET in the Worker and Access provisioner.
+   Use separately scoped CLI credentials; MCP login does not populate them.
+   Keep the identity portal publicly reachable, separate from the protected app.
+   For a new installation, help me enroll the administrator passkey and then
+   remove the bootstrap secret from deployment stores. Configure explicit grants
+   for the listed users through the supported administration flow; new accounts
+   start without grants. Send invitations only if enabled in my settings above.
+
+6. Run access:plan, access:inspect, then access:apply using npm run. Next run
+   network:plan, network:inspect, then network:apply. Use the repository scripts
+   for provisioning and legacy-policy migration; do not bypass ownership checks.
+   Establish Access and WAF protection before publishing the route. Preserve
+   mandatory Access JWT checks, verified origin TLS, and unrelated resources.
+
+7. Privately transfer the generated connector bundle to the named device and run
+   its installer there. Apply only the origin binding/firewall changes needed to
+   prevent unintended direct access, preserving SSH and the existing VPN.
+   Check tunnel health and actual origin reachability, not just service status.
+
+8. Verify from outside the private network: an authorized user reaches the app;
+   an unauthenticated user and a signed-in user without its grant cannot reach
+   protected content; WAF blocks the configured test path; direct-origin access
+   cannot bypass the intended boundary. Check connector restart and VPN behavior
+   using the runbook without cutting off the only management path. Test email
+   through the deployed Worker's mail flow to my test recipient and inspect
+   delivery through Resend MCP; provider acceptance alone is not delivery proof.
+   Ask me to complete human browser steps and identify any tests still unverified.
+
+Finish with the service URL, resources changed, connector host/service name,
+verification results, remaining limitations, rollback steps, and a Mermaid
+diagram of the actual deployed flow. Do the work; do not stop at a proposed plan.
+```
+
 ## Remembered sign-in
 
 **Remember me on this device** is checked by default for passkey sign-in and enrollment. It creates a persistent HttpOnly, Secure (on HTTPS), SameSite=Lax cookie with matching Max-Age, Expires and server-side expiry, lasting `REMEMBER_ME_TTL_SECONDS` (30 days by default). Uncheck it for a browser-session cookie; the server still caps its lifetime using `SESSION_TTL_SECONDS`. API clients omitting `remember_me` keep the previous persistent `SESSION_TTL_SECONDS` behavior. Sign out, administrator session revocation, or disabling the account invalidates the session early.
@@ -70,6 +175,8 @@ Only active administrators can use the management endpoints. Mutation requests r
 Cloudflare Access has its own sessions. Disabling a user or signing them out here does not immediately revoke a previously established Cloudflare Access session or a signed ID token; revoke those sessions in Cloudflare when immediate application access removal is needed. The portal displays this distinction beside the controls.
 
 ## Invitation emails with Resend
+
+See the [Resend setup and email-flow runbook](docs/resend-setup.md) for MCP and Cloudflare DNS setup, deployment credentials, delivery checks, and Mermaid diagrams of sender setup, invitations, and email-code sign-in.
 
 Verify a sending domain in Resend, create a **sending-only API key restricted to that domain**, then configure:
 
@@ -252,7 +359,7 @@ Passkey private keys remain with authenticators. The server stores public creden
 
 The current UI uses inline scripts. Basic per-IP/path request throttling and expired-record cleanup are included. Remaining hardening includes strict CSP/client bundling, stronger anti-abuse and enumeration resistance, comprehensive audit administration, individual session management, deployed recovery validation, and independent OIDC conformance/security review.
 
-Keep local DNS, reverse proxies, existing tunnels, VPNs and port forwarding under your own deployment's control. This application does not configure or change them. Do not place the future OIDC provider behind its own Cloudflare Access login, which would create an authentication loop.
+Keep local DNS, reverse proxies, VPN routing and port forwarding under your own deployment's control. The Worker does not change them. The separate opt-in network provisioning CLI manages its named Cloudflare tunnel, public DNS, and security/cache rules as described in [network setup](docs/network-setup.md). Do not place the OIDC provider behind its own Cloudflare Access login, which would create an authentication loop.
 
 Cloudflare's [Workers Free plan supports SQLite-backed Durable Objects](https://developers.cloudflare.com/durable-objects/platform/pricing/). Small-group usage is the intended scale; account-wide limits apply. This project does not require a paid storage backend.
 
