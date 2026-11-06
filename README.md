@@ -163,7 +163,11 @@ No new GitHub secret or Cloudflare Access policy is required. These are authenti
 
 ## User management console
 
-Open your configured `PUBLIC_ORIGIN` and sign in with the administrator passkey. The **User management** section shows user names, email addresses, roles, account status, passkey counts, active portal-session counts and the last passkey sign-in. Sign-in and enrollment forms are hidden while signed in.
+Open your configured `PUBLIC_ORIGIN`, sign in as an administrator, and select **User management** (or open `/admin`). This dedicated page shows user names, email addresses, roles, account status, passkey counts, active portal-session counts and the last passkey sign-in. Search by name/email and filter by account status or saved service access.
+
+Select the services a person may open, then choose **Save service access**. A fresh passkey is requested when needed. New family accounts start with no service access. Members see only their permitted services: ungranted names, hostnames and links are absent from both the portal API response and launcher HTML, with no locked tiles advertising them. Only administrators can retrieve the full service catalog. Administrators retain all configured services; these grants control service entry, not roles inside an application.
+
+Disabled accounts retain their saved grants in the editor but have no effective access until enabled. Unchanged saves leave sessions alone; changed saves revoke portal sessions and pending OIDC authentication. The editor preserves unsaved changes when editing another person, warns before discarding them, and rejects stale saves when access has changed in another tab. Existing Cloudflare Access sessions still require separate revocation; see [per-user app permissions](docs/app-permissions.md).
 
 - **Disable account** blocks a family member from signing in, removes their portal sessions, and clears pending login challenges and Worker-issued OIDC codes/access tokens. It retains their account and passkey.
 - **Enable account** restores sign-in using the existing passkey. Old portal sessions remain invalid.
@@ -345,6 +349,7 @@ The source is organized as follows:
 | `scripts/configure.mjs` | Validated deployment config generation |
 | `src/portal.ts`, `src/icons.ts`, `src/ui-assets.ts` | Bootstrap portal layout, local stylesheet delivery and selected Bootstrap Icons |
 | `src/admin.ts` | Administrator-only user status, session revocation and pending invitation controls |
+| `src/admin-ui.ts` | Dedicated user-management page controls, service grants, filters and unsaved edits |
 | `src/email-login.ts` | Browser-bound email-code requests, rate limits and atomic session issuance |
 | `src/email.ts` | Resend invitation templates, validation and bounded idempotent delivery |
 | `src/launcher.ts` | Custom launcher rendering and Access JWT verification |

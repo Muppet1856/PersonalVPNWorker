@@ -21,7 +21,8 @@ test('wrangler dev: portal, passkeys, sessions, invitations and replay rejection
   const child=spawn(process.execPath,['node_modules/wrangler/bin/wrangler.js','dev','--local','--env','local',
     '--ip','127.0.0.1','--port',String(port),'--inspector-port','0','--persist-to',state,
     '--show-interactive-dev-session=false','--var',`PUBLIC_ORIGIN:${origin}`,
-    '--var','ACCESS_TEAM_DOMAIN:example.cloudflareaccess.com','--var','OIDC_CLIENT_SECRET:wrangler-test-secret-with-at-least-32-characters','--var','ADMIN_SETUP_SECRET:ci-bootstrap-only','--var','SITE_NAME:CI Access'],
+    '--var','ACCESS_TEAM_DOMAIN:example.cloudflareaccess.com','--var','OIDC_CLIENT_SECRET:wrangler-test-secret-with-at-least-32-characters','--var','ADMIN_SETUP_SECRET:ci-bootstrap-only','--var','SITE_NAME:CI Access',
+    '--var','APP_LINKS_JSON:[{"name":"Chat","url":"https://chat.example.com"},{"name":"Unlisted service sentinel","url":"https://unlisted.example.com"}]'],
     {stdio:['ignore','pipe','pipe'],env:{...process.env,CI:'true',WRANGLER_SEND_METRICS:'false'}});
   let logs='';child.stdout.on('data',chunk=>{logs=(logs+chunk).slice(-16000);});child.stderr.on('data',chunk=>{logs=(logs+chunk).slice(-16000);});
   let spawnError;child.on('error',error=>{spawnError=error;});
@@ -50,6 +51,8 @@ test('wrangler dev: portal, passkeys, sessions, invitations and replay rejection
     assert.equal((await call('/api/register/verify',registration)).status,403);
     const cookie=registered.headers.get('set-cookie').split(';')[0];
     assert.equal((await (await call('/api/me',undefined,cookie)).json()).user.role,'admin');
+    assert.equal((await call('/admin')).status,302);
+    const management=await call('/admin',undefined,cookie);assert.equal(management.status,200);assert.match(await management.text(),/People & service access/);
     assert.equal((await call('/api/admin/invite',{email:'member@example.com'},cookie)).status,200);
     assert.equal((await call('/api/admin/users')).status,403);
     const members=await (await call('/api/admin/users',undefined,cookie)).json();assert.equal(members.users[0].passkey_count,1);assert.equal(members.users[0].session_count,1);
@@ -57,6 +60,19 @@ test('wrangler dev: portal, passkeys, sessions, invitations and replay rejection
     const pending=await (await call('/api/admin/invites',undefined,cookie)).json();assert.equal(pending.invitations.length,1);
     assert.equal((await call('/api/admin/invites/revoke',{invitation_id:pending.invitations[0].id},cookie)).status,200);
     assert.equal((await (await call('/api/admin/invites',undefined,cookie)).json()).invitations.length,0);
+    const invitation=await (await call('/api/admin/invite',{email:'service-member@example.com'},cookie)).json();
+    const memberOptions=await (await call('/api/register/options',{token:invitation.token,name:'Service member'})).json();const memberKey=authenticator(origin);
+    const memberRegistration=await call('/api/register/verify',{token:invitation.token,flow:memberOptions.flow,credential:memberKey.register(memberOptions.options.challenge)});
+    assert.equal(memberRegistration.status,200);const memberCookie=memberRegistration.headers.get('set-cookie').split(';')[0];
+    const member=await (await call('/api/me',undefined,memberCookie)).json();assert.deepEqual(member.apps,[]);
+    assert.equal((await call('/admin',undefined,memberCookie)).status,403);
+    assert.equal((await call('/api/admin/users',undefined,memberCookie)).status,403);
+    const grant=await call('/api/admin/users',{user_id:member.user.id,action:'set_apps',allowed_apps:['chat.example.com'],expected_access_revision:0},cookie);assert.equal(grant.status,200);
+    assert.equal((await (await call('/api/me',undefined,memberCookie)).json()).user,null);
+    const memberLoginOptions=await (await call('/api/login/options',{email:'service-member@example.com'})).json();
+    const memberLogin=await call('/api/login/verify',{flow:memberLoginOptions.flow,credential:memberKey.login(memberLoginOptions.options.challenge)});
+    assert.equal(memberLogin.status,200);const permitted=await (await call('/api/me',undefined,memberLogin.headers.get('set-cookie').split(';')[0])).json();
+    assert.deepEqual(permitted.apps.map(app=>app.id),['chat.example.com']);assert.ok(!JSON.stringify(permitted).includes('Unlisted service sentinel'));assert.ok(!JSON.stringify(permitted).includes('unlisted.example.com'));
     const options2=await (await call('/api/login/options',{email:'ci@example.com'})).json();
     const assertion={flow:options2.flow,credential:auth.login(options2.options.challenge),remember_me:true};
     const login=await call('/api/login/verify',assertion);assert.equal(login.status,200);assert.match(login.headers.get('set-cookie'),/Max-Age=2592000/);assert.match(login.headers.get('set-cookie'),/Expires=/);

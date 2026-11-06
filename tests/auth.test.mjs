@@ -211,7 +211,7 @@ test('direct portal visits launch separate tabs while app sign-in keeps re-authe
   const get=id=>{if(!nodes.has(id))nodes.set(id,node());return nodes.get(id);};let dashboard;
   const document={body:{classList:{toggle(name,value){dashboard=value;}}},createElement:()=>node()};
   const fetcher=async()=>({json:async()=>({user:{name:'Member',email:'member@example.com',role:'family'},apps:[{name:'Chat',url:'https://chat.example.com',icon:'chat'}],oidc_ready:true,email_ready:false})});
-  const refresh=new Function('$','fetch','continuingLogin','document','refreshAdmin','appIcons','refreshAccount',`let emailReady=false;return (${refreshSource});`)(get,fetcher,continuing,document,()=>{throw Error('Unexpected administrator request');},{grid:'<svg></svg>'},async()=>{});
+  const refresh=new Function('$','fetch','continuingLogin','document','refreshAdmin','appIcons','refreshAccount','clearAdmin',`let emailReady=false;const adminView=false;return (${refreshSource});`)(get,fetcher,continuing,document,()=>{throw Error('Unexpected administrator request');},{grid:'<svg></svg>'},async()=>{},()=>{});
   await refresh();assert.equal(dashboard,!continuing);assert.equal(get('signin').hidden,!continuing);
   const link=get('appLinks').children[0];assert.equal(link.target,continuing?'_self':'_blank');assert.equal(link.rel,'noopener noreferrer');
  }

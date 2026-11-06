@@ -17,6 +17,10 @@ export function configuredApps(env:{APP_LINKS_JSON?:string}):Application[] {
 }
 export function permittedApps(env:Pick<AuthEnv,'DB'|'APP_LINKS_JSON'>,user:Pick<User,'id'|'role'|'active'>):Application[] {
  if(!user.active)return [];
+ return grantedApps(env,user);
+}
+// The management editor must retain saved grants even while an account is disabled.
+export function grantedApps(env:Pick<AuthEnv,'DB'|'APP_LINKS_JSON'>,user:Pick<User,'id'|'role'>):Application[] {
  const apps=configuredApps(env);
  if(user.role==='admin')return apps;
  const grants=new Set(env.DB.prepare('SELECT app_id FROM user_app_permissions WHERE user_id=?').bind(user.id).all<{app_id:string}>().results.map(row=>row.app_id));

@@ -75,11 +75,60 @@ test('app edits require fresh live passkey authentication and revoke all portal/
  await rejected(await setApps(f,['chat.example.com']));
  sql.prepare("UPDATE sessions SET auth_method='passkey' WHERE user_id=?").run(f.admin.user.id);
  const before=sql.prepare('SELECT access_revision AS n FROM users WHERE id=?').get(f.family.user.id).n;
- const response=await ok(await setApps(f,[]));assert.equal(response.access_sessions_require_revocation,true);
+ const response=await ok(await setApps(f,['chat.example.com']));assert.equal(response.access_sessions_require_revocation,true);
  assert.equal(sql.prepare('SELECT access_revision AS n FROM users WHERE id=?').get(f.family.user.id).n,before+1);
  assert.equal(sql.prepare('SELECT count(*) AS n FROM sessions WHERE user_id=?').get(f.family.user.id).n,0);
  sql.prepare('DELETE FROM passkeys WHERE user_id=?').run(f.admin.user.id);
  await rejected(await setApps(f,['chat.example.com']));
+});
+
+test('disabled accounts keep editable grants but expose no effective services',async()=>{
+ const f=await accounts();await ok(await setApps(f,['chat.example.com']));
+ await ok(await f.call('/api/admin/users',{user_id:f.family.user.id,action:'disable'},f.admin.cookie));
+ let list=await ok(await f.call('/api/admin/users',undefined,f.admin.cookie));
+ const member=list.users.find(user=>user.id===f.family.user.id);
+ assert.deepEqual(member.granted_apps,['chat.example.com']);assert.deepEqual(member.allowed_apps,[]);
+ await ok(await f.call('/api/admin/users',{user_id:member.id,action:'set_apps',allowed_apps:['git.example.com'],expected_access_revision:member.access_revision},f.admin.cookie));
+ list=await ok(await f.call('/api/admin/users',undefined,f.admin.cookie));
+ assert.deepEqual(list.users.find(user=>user.id===member.id).allowed_apps,[]);
+ await ok(await f.call('/api/admin/users',{user_id:member.id,action:'enable'},f.admin.cookie));
+ const cookie=await login(f,f.family);
+ assert.deepEqual((await ok(await f.call('/api/me',undefined,cookie))).apps.map(app=>app.id),['git.example.com']);
+});
+
+test('stale grant updates fail without overwriting newer access or revoking sessions',async()=>{
+ const f=await accounts();const initial=await ok(await f.call('/api/admin/users',undefined,f.admin.cookie));
+ const revision=initial.users.find(user=>user.id===f.family.user.id).access_revision;
+ const edit=expected=>f.call('/api/admin/users',{user_id:f.family.user.id,action:'set_apps',allowed_apps:['git.example.com'],expected_access_revision:expected},f.admin.cookie);
+ for(const invalid of [-1,0.5,'0',null])assert.equal((await edit(invalid)).status,400);
+ await ok(await setApps(f,['chat.example.com']));const cookie=await login(f,f.family);
+ assert.equal((await edit(revision)).status,409);
+ assert.deepEqual(allowedAppIDs(f.env,f.family.user),['chat.example.com']);
+ assert.equal((await ok(await f.call('/api/me',undefined,cookie))).user.id,f.family.user.id);
+});
+
+test('unchanged permissions do not invalidate sessions or advance the access revision',async()=>{
+ const f=await accounts();await ok(await setApps(f,['chat.example.com','git.example.com']));const cookie=await login(f,f.family);
+ const before=f.env.DB.sql.prepare('SELECT access_revision FROM users WHERE id=?').get(f.family.user.id).access_revision;
+ const result=await ok(await setApps(f,['git.example.com','chat.example.com']));
+ assert.equal(result.changed,false);assert.equal(result.access_sessions_require_revocation,false);
+ assert.equal(f.env.DB.sql.prepare('SELECT access_revision FROM users WHERE id=?').get(f.family.user.id).access_revision,before);
+ assert.equal((await ok(await f.call('/api/me',undefined,cookie))).user.id,f.family.user.id);
+});
+
+test('service metadata is disclosed only to permitted members or administrators',async()=>{
+ const f=await accounts();f.env.APP_LINKS_JSON=JSON.stringify([{name:'Granted workspace',url:'https://chat.example.com'},{name:'Unlisted service sentinel',url:'https://unlisted.example.com'}]);
+ await ok(await setApps(f,['chat.example.com']));const cookie=await login(f,f.family);
+ for(const session of [undefined,cookie]){
+  for(const path of ['/','/api/me','/api/admin/users','/api/admin/invites']){
+   const response=await f.call(path,undefined,session);const text=await response.text();
+   assert.ok(!text.includes('Unlisted service sentinel'),path);assert.ok(!text.includes('unlisted.example.com'),path);
+  }
+ }
+ const unauthorized=await f.call('/admin');assert.equal(unauthorized.status,302);assert.equal(unauthorized.headers.get('location'),'/?manage=1');
+ assert.equal((await f.call('/admin',undefined,cookie)).status,403);
+ const admin=await f.call('/admin',undefined,f.admin.cookie);assert.equal(admin.status,200);assert.match(await admin.text(),/People & service access/);
+ const list=await ok(await f.call('/api/admin/users',undefined,f.admin.cookie));assert.equal(list.apps[1].name,'Unlisted service sentinel');
 });
 
 async function oidc(f,session){
@@ -110,12 +159,14 @@ test('signed OIDC claims carry only granted apps; old codes/tokens die after per
 
 test('launcher uses current database grants, not old JWT grant data; disabled account denied',async()=>{
  const f=await accounts();Object.assign(f.env,{LAUNCHER_ORIGIN:'https://access.example.com',ACCESS_TEAM_DOMAIN:'example.cloudflareaccess.com',LAUNCHER_ACCESS_AUD:'a'.repeat(64)});
+ f.env.APP_LINKS_JSON=JSON.stringify([applications[0],{name:'Unlisted service sentinel',url:'https://git.example.com'}]);
  const {privateKey,publicKey}=await generateKeyPair('RS256'),jwk=await exportJWK(publicKey);jwk.kid='launcher';const keys=createLocalJWKSet({keys:[jwk]});
  const token=await new SignJWT({email:f.family.email,allowed_apps:['chat.example.com','git.example.com']}).setProtectedHeader({alg:'RS256',kid:'launcher'}).setSubject('access-subject').setIssuedAt().setIssuer('https://'+f.env.ACCESS_TEAM_DOMAIN).setAudience(f.env.LAUNCHER_ACCESS_AUD).setExpirationTime('5m').sign(privateKey);
  const request=()=>new Request(f.env.LAUNCHER_ORIGIN,{headers:{'cf-access-jwt-assertion':token}});
  let response=await handleLauncher(request(),f.env,keys);assert.equal(response.status,200);assert.ok(!(await response.text()).includes('href="https://chat.example.com'));
  await ok(await setApps(f,['chat.example.com']));
  response=await handleLauncher(request(),f.env,keys);const html=await response.text();assert.ok(html.includes('href="https://chat.example.com'));assert.ok(!html.includes('href="https://git.example.com'));
+ assert.ok(!html.includes('Unlisted service sentinel'));assert.ok(!html.includes('git.example.com'));
  f.env.DB.sql.prepare('UPDATE users SET active=0 WHERE id=?').run(f.family.user.id);
  assert.equal((await handleLauncher(request(),f.env,keys)).status,403);
 });

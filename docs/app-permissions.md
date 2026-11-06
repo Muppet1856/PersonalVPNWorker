@@ -1,5 +1,13 @@
 # Per-user application permissions
 
+## User management portal
+
+Sign in as an administrator and select **User management**, or visit `/admin` on the authentication origin. Unauthenticated visitors are sent to sign-in; non-administrators are denied. Search users by name/email and filter by status or saved service access. Check the desired services and select **Save service access**; the browser requests passkey verification if the administrator's verification is no longer fresh. Service permissions mean permission to enter the application, not a role or read/write permission inside it.
+
+Members receive only permitted service names, URLs and hostnames in `/api/me` and the launcher HTML. There are no locked tiles for other services. Accounts with no grants see a generic empty state. The complete service catalog is returned only by the administrator API. Hiding services does not replace the Access enforcement described below.
+
+The administrator API distinguishes `granted_apps` (saved grants, also shown for disabled accounts) from `allowed_apps` (effective access, empty for disabled accounts). Enabling an account restores its saved permissions. The portal submits `expected_access_revision` with grant saves; conflicting changes return HTTP 409 and leave permissions and sessions untouched. Older API clients may omit the revision. An unchanged save returns `changed: false` and does not revoke sessions. Draft edits survive saves to other accounts; use **Reset changes** or **Refresh users** to discard them deliberately.
+
 ## Breaking rollout behavior
 
 **New family accounts start with no app grants.** The reviewed V5 rollout preserves prior access for pre-existing active family accounts to exactly `chat.zellen.ai` and `git.zellen.io`, but only when each hostname is present in validated `APP_LINKS_JSON`. This fixed, one-time upgrade data is in `src/rollout.ts`; it is not a runtime switch. Other hostnames and inactive users receive no grants. The grants and schema marker commit atomically. Restarting, changing configuration later, or deploying again cannot replay the migration or restore a removed grant. A database already at V5 is not modified by this preservation step. An administrator should review the resulting grants before the corresponding Access policies are enabled. Administrators always retain all configured applications and cannot have their app grants edited in this console. Newly configured applications are denied to family accounts until explicitly granted.
@@ -24,7 +32,7 @@ Cloudflare documents [multi-record custom OIDC claims](https://developers.cloudf
 
 ## Changing permissions and existing sessions
 
-Saving grants requires passkey verification within five minutes; mailbox-only sessions cannot change grants. The target user's portal sessions, pending login challenges, OIDC codes and bearer tokens are revoked transactionally. An access-revision check blocks an in-flight token signing operation if grants change before it finishes.
+Saving changed grants requires passkey verification within five minutes; mailbox-only sessions cannot change grants. The target user's portal sessions, pending login and account-security challenges, OIDC codes and bearer tokens are revoked transactionally. An access-revision check blocks an in-flight token signing operation if grants change before it finishes.
 
 This does **not** revoke already issued Cloudflare Access cookies, global Access sessions, application-local sessions, or the signed ID token already delivered to Access. Those are external state. Revoke affected Access sessions through the approved Cloudflare operator workflow, force fresh IdP authentication, and terminate application sessions if required. Until that happens, old downstream access can continue for the existing session lifetime. The UI/API explicitly warn about this limitation; no external session-revocation API is called automatically.
 
